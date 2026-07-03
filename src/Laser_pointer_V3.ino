@@ -64,24 +64,10 @@ void loop() {
   MsgRead();
   USBMsgRead();
 
-  if (newMessage) {
-    newMessage = 0;
-
-    if (mode == 1) {
-      if ((iCH1 != NODATA) || (iCH2 != NODATA)) {
-        setAxis1(iCH1 / 100.0f);
-        setAxis2(iCH2 / 100.0f);
-        setSpeedAcc();
-      }
-    } else if (mode == 4) {
-      emergencyStop();
-      digitalWrite(STATUS_LED_PIN, LOW);
-    } else if (mode == 5) {
-      motorsCalibration();
-      setSpeedAcc();
-    }
-
-    mode = 0;
+  if (hasPendingCommand())
+  {
+    consumeCommand(pending_command);
+    pending_command.type = COMMAND_NONE;
   }
 
   timer_value = micros();
