@@ -72,7 +72,8 @@ static void restartAxisTimer(esp_timer_handle_t timer, bool &running, uint32_t p
   running = true;
 }
 
-void initializeMotionHardware() {
+bool initializeMotionHardware()
+{
   esp_timer_create_args_t motor1_args = {};
   motor1_args.callback = &motor1TimerCallback;
   motor1_args.name = "motor1";
@@ -81,8 +82,15 @@ void initializeMotionHardware() {
   motor2_args.callback = &motor2TimerCallback;
   motor2_args.name = "motor2";
 
-  esp_timer_create(&motor1_args, &motor1_timer);
-  esp_timer_create(&motor2_args, &motor2_timer);
+  if (esp_timer_create(&motor1_args, &motor1_timer) != ESP_OK)
+  {
+    return false;
+  }
+  if (esp_timer_create(&motor2_args, &motor2_timer) != ESP_OK)
+  {
+    return false;
+  }
+  return true;
 }
 
 void stopMotionTimers() {
@@ -109,6 +117,20 @@ void emergencyStop() {
   setDriverEnabled(false);
 }
 
+void stopActiveMovement()
+{
+  stopMotionTimers();
+  speed_M1 = 0;
+  speed_M2 = 0;
+  dir_M1 = 0;
+  dir_M2 = 0;
+  target_position_M1 = position_M1;
+  target_position_M2 = position_M2;
+  target_angleA1 = position_M1 / M1_AXIS_STEPS_PER_UNIT;
+  target_angleA2 = position_M2 / M2_AXIS_STEPS_PER_UNIT;
+  working = false;
+}
+
 void zeroCurrentPosition() {
   stopMotionTimers();
   position_M1 = 0;
@@ -122,8 +144,11 @@ void zeroCurrentPosition() {
   working = false;
 }
 
-void motorsCalibration() {
-  zeroCurrentPosition();
+void setMotionLimits(int speed_percent, int acceleration_percent)
+{
+  configSpeed((int)((MAX_SPEED_M1 * float(speed_percent)) / 100.0f), (int)((MAX_SPEED_M2 * float(speed_percent)) / 100.0f));
+  configAcceleration((int)((MAX_ACCEL_M1 * float(acceleration_percent)) / 100.0f), (int)((MAX_ACCEL_M2 * float(acceleration_percent)) / 100.0f));
+  setSpeedAcc();
 }
 
 void configSpeed(int target_sM1, int target_sM2) {
@@ -167,6 +192,50 @@ void setAxis2(float angleA2) {
   Serial.print(angleA2);
   Serial.print(",");
   Serial.println(target_position_M2);
+}
+
+void setAxisTarget(float axis1_degrees, float axis2_degrees)
+{
+  setAxis1(axis1_degrees);
+  setAxis2(axis2_degrees);
+  setSpeedAcc();
+  working = true;
+}
+
+void consumeCommand(const RobotCommand &command)
+{
+  if (command.type == COMMAND_NONE)
+  {
+    return;
+  }
+
+  if (emergency_stop_active && command.type != COMMAND_EMERGENCY_STOP)
+  {
+    return;
+  }
+
+  switch (command.type)
+  {
+  case COMMAND_SET_AXIS_TARGET:
+    setAxisTarget(command.axis1_degrees, command.axis2_degrees);
+    break;
+  case COMMAND_SET_MOTION_LIMITS:
+    setMotionLimits(command.speed_percent, command.acceleration_percent);
+    break;
+  case COMMAND_ZERO_CURRENT_POSITION:
+    zeroCurrentPosition();
+    setSpeedAcc();
+    break;
+  case COMMAND_EMERGENCY_STOP:
+    emergencyStop();
+    digitalWrite(STATUS_LED_PIN, LOW);
+    break;
+  case COMMAND_STOP_ACTIVE_MOVEMENT:
+    stopActiveMovement();
+    break;
+  case COMMAND_NONE:
+    break;
+  }
 }
 
 void setMotorM1Speed(int32_t tspeed, int16_t dt, int16_t overshoot_comp) {

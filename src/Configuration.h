@@ -61,6 +61,25 @@ struct angles {
   float A2;
 };
 
+enum CommandType
+{
+  COMMAND_NONE = 0,
+  COMMAND_SET_AXIS_TARGET,
+  COMMAND_SET_MOTION_LIMITS,
+  COMMAND_ZERO_CURRENT_POSITION,
+  COMMAND_EMERGENCY_STOP,
+  COMMAND_STOP_ACTIVE_MOVEMENT
+};
+
+struct RobotCommand
+{
+  CommandType type;
+  float axis1_degrees;
+  float axis2_degrees;
+  int speed_percent;
+  int acceleration_percent;
+};
+
 long loop_counter;
 int16_t slow_loop_counter;
 long timeout_counter;
@@ -117,17 +136,7 @@ int16_t servo_pos2;
 bool servo1_ready = false;
 bool servo2_ready = false;
 
-int16_t iCH1 = NODATA;
-int16_t iCH2 = NODATA;
-int16_t iCH3 = NODATA;
-int16_t iCH4 = NODATA;
-int16_t iCH5 = NODATA;
-int16_t iCH6 = NODATA;
-int16_t iCH7 = NODATA;
-int16_t iCH8 = NODATA;
-uint8_t mode = 0;
-
-uint8_t newMessage = 0;
+RobotCommand pending_command = {COMMAND_NONE, 0.0f, 0.0f, 0, 0};
 uint8_t MsgBuffer[MSGMAXLEN] = {0};
 
 String MAC;

@@ -8,6 +8,16 @@ static WiFiUDP commandUdp;
 static const uint16_t COMMAND_PORT = 2222;
 static const char *WIFI_PASSWORD = "87654321";
 
+static bool hasPendingCommand()
+{
+  return pending_command.type != COMMAND_NONE;
+}
+
+static void emitCommand(const RobotCommand &command)
+{
+  pending_command = command;
+}
+
 static void feedMessageByte(uint8_t interface_id, uint8_t value) {
   for (uint8_t i = 0; i < (MSGMAXLEN - 1); i++) {
     MsgBuffer[i] = MsgBuffer[i + 1];
@@ -16,7 +26,8 @@ static void feedMessageByte(uint8_t interface_id, uint8_t value) {
   ParseMsg(interface_id);
 }
 
-void NetworkBegin() {
+bool NetworkBegin()
+{
   WiFi.mode(WIFI_AP);
 
   String suffix = String((uint32_t)(ESP.getEfuseMac() & 0xFFFF), HEX);
@@ -25,7 +36,7 @@ void NetworkBegin() {
 
   if (!WiFi.softAP(apName.c_str(), WIFI_PASSWORD)) {
     Serial.println("WiFi AP start failed");
-    return;
+    return false;
   }
 
   commandUdp.begin(COMMAND_PORT);
@@ -36,6 +47,7 @@ void NetworkBegin() {
   Serial.println(WiFi.softAPIP());
   Serial.print("WiFi UDP port: ");
   Serial.println(COMMAND_PORT);
+  return true;
 }
 
 int32_t ExtractParamInt4b(uint8_t pos) {
@@ -87,85 +99,63 @@ void USBMsgRead() {
 }
 
 void ParseMsg(uint8_t interface) {
+  (void)interface;
+
   if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'H')) {
-    Serial.println("->MSG: JJAH: HELLO!");
-    working = false;
+    Serial.println("->MSG: JJAH: STOP ACTIVE MOVEMENT");
+    emitCommand({COMMAND_STOP_ACTIVE_MOVEMENT, 0.0f, 0.0f, 0, 0});
     return;
   }
 
   if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'T')) {
     Serial.print("->MSG: JJAT:");
-    iCH1 = ExtractParamString6b(4);
-    iCH2 = ExtractParamString6b(11);
-    iCH3 = 0;
-    iCH4 = 0;
-    iCH5 = 0;
-    iCH6 = 0;
-    iCH7 = 0;
-    iCH8 = 0;
-    Serial.print(iCH1);
+    int32_t axis1_value = ExtractParamString6b(4);
+    int32_t axis2_value = ExtractParamString6b(11);
+    Serial.print(axis1_value);
     Serial.print(" ");
-    Serial.println(iCH2);
-    mode = 1;
-    newMessage = 1;
-    working = true;
+    Serial.println(axis2_value);
+    emitCommand({COMMAND_SET_AXIS_TARGET, axis1_value / 100.0f, axis2_value / 100.0f, 0, 0});
     return;
   }
 
   if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'M')) {
     Serial.print("->MSG: JJAM:");
-    iCH1 = ExtractParamInt2b(4);
-    iCH2 = ExtractParamInt2b(6);
-    iCH3 = ExtractParamInt2b(8);
-    iCH4 = ExtractParamInt2b(10);
-    iCH5 = ExtractParamInt2b(12);
-    iCH6 = ExtractParamInt2b(14);
-    iCH7 = ExtractParamInt2b(16);
-    iCH8 = ExtractParamInt2b(18);
-    Serial.print(iCH1);
+    int16_t axis1_value = ExtractParamInt2b(4);
+    int16_t axis2_value = ExtractParamInt2b(6);
+    int16_t first_unused_value = ExtractParamInt2b(8);
+    Serial.print(axis1_value);
     Serial.print(" ");
-    Serial.print(iCH2);
+    Serial.print(axis2_value);
     Serial.print(" ");
-    Serial.println(iCH3);
-    mode = 1;
-    newMessage = 1;
-    working = true;
+    Serial.println(first_unused_value);
+    emitCommand({COMMAND_SET_AXIS_TARGET, axis1_value / 100.0f, axis2_value / 100.0f, 0, 0});
     return;
   }
 
   if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'S')) {
     Serial.print("->MSG: JJAS:");
-    iCH1 = ExtractParamInt2b(4);
-    iCH2 = ExtractParamInt2b(6);
-    iCH3 = ExtractParamInt2b(8);
-    iCH4 = ExtractParamInt2b(10);
-    iCH5 = ExtractParamInt2b(12);
+    int16_t speed_percent = ExtractParamInt2b(4);
+    int16_t acceleration_percent = ExtractParamInt2b(8);
+    int16_t trajectory_speed = ExtractParamInt2b(12);
     Serial.print(" SPEED XY:");
-    Serial.print(iCH1);
+    Serial.print(speed_percent);
     Serial.print(" ACC XY:");
-    Serial.print(iCH3);
+    Serial.print(acceleration_percent);
     Serial.print(" TRAJ S:");
-    Serial.println(iCH5);
-
-    configSpeed((int)((MAX_SPEED_M1 * float(iCH1)) / 100.0f), (int)((MAX_SPEED_M2 * float(iCH1)) / 100.0f));
-    configAcceleration((int)((MAX_ACCEL_M1 * float(iCH3)) / 100.0f), (int)((MAX_ACCEL_M2 * float(iCH3)) / 100.0f));
-    setSpeedAcc();
+    Serial.println(trajectory_speed);
+    emitCommand({COMMAND_SET_MOTION_LIMITS, 0.0f, 0.0f, speed_percent, acceleration_percent});
     return;
   }
 
   if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'C')) {
     Serial.println("->MSG: JJAC:");
-    mode = 5;
-    newMessage = 1;
-    working = true;
+    emitCommand({COMMAND_ZERO_CURRENT_POSITION, 0.0f, 0.0f, 0, 0});
     return;
   }
 
   if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'E')) {
     Serial.println("->MSG: JJAE:");
-    mode = 4;
-    newMessage = 1;
-    working = true;
+    emitCommand({COMMAND_EMERGENCY_STOP, 0.0f, 0.0f, 0, 0});
     return;
   }
 }
