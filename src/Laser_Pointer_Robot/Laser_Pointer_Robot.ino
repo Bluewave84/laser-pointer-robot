@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include "Configuration.h"
+#include "Command.h"
 
 #define VERSION "ESP32 Laser Pointer v1"
 
@@ -37,7 +38,7 @@ void setup() {
   Serial.print("ENABLE: ");
   Serial.println(CNC_ENABLE_PIN);
 
-  NetworkBegin();
+  beginCommandInput();
   initializeMotionHardware();
 
   position_M1 = ROBOT_INITIAL_POSITION_M1 * M1_AXIS_STEPS_PER_UNIT;
@@ -61,13 +62,12 @@ void setup() {
 }
 
 void loop() {
-  MsgRead();
-  USBMsgRead();
+  pollCommandInput();
 
-  if (hasPendingCommand())
+  RobotCommand command;
+  if (takeCommand(command))
   {
-    consumeCommand(pending_command);
-    pending_command.type = COMMAND_NONE;
+    consumeCommand(command);
   }
 
   timer_value = micros();

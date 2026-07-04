@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <esp_timer.h>
+#include "Command.h"
 
 static esp_timer_handle_t motor1_timer = nullptr;
 static esp_timer_handle_t motor2_timer = nullptr;
