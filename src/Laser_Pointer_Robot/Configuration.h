@@ -44,6 +44,17 @@
 #define RAD2GRAD 57.2957795
 #define GRAD2RAD 0.01745329251994329576923690768489
 
+#if defined(ARDUINO_NANO_ESP32)
+#define X_STEP_PIN D2
+#define X_DIR_PIN D3
+#define Y_STEP_PIN D4
+#define Y_DIR_PIN D5
+#define CNC_ENABLE_PIN D6
+#ifndef LED_BUILTIN
+#define LED_BUILTIN D13
+#endif
+#define STATUS_LED_PIN LED_BUILTIN
+#else
 #define X_STEP_PIN 26
 #define X_DIR_PIN 27
 #define Y_STEP_PIN 25
@@ -53,10 +64,12 @@
 #define LED_BUILTIN 2
 #endif
 #define STATUS_LED_PIN LED_BUILTIN
+#endif
 
 #define TELEMETRY "192.168.4.2"
 
-struct angles {
+struct angles
+{
   float A1;
   float A2;
 };
@@ -142,19 +155,24 @@ uint8_t MsgBuffer[MSGMAXLEN] = {0};
 String MAC;
 bool emergency_stop_active = false;
 
-int16_t myAbs(int16_t param) {
+int16_t myAbs(int16_t param)
+{
   return (param < 0) ? -param : param;
 }
 
-long myAbsLong(long param) {
+long myAbsLong(long param)
+{
   return (param < 0) ? -param : param;
 }
 
-int sign(int32_t val) {
-  if (val < 0) {
+int sign(int32_t val)
+{
+  if (val < 0)
+  {
     return -1;
   }
-  if (val > 0) {
+  if (val > 0)
+  {
     return 1;
   }
   return 0;

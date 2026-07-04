@@ -3,10 +3,11 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include "secrets.h"
 
 static WiFiUDP commandUdp;
 static const uint16_t COMMAND_PORT = 2222;
-static const char *WIFI_PASSWORD = "87654321";
+static const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
 
 static bool hasPendingCommand()
 {
@@ -18,8 +19,10 @@ static void emitCommand(const RobotCommand &command)
   pending_command = command;
 }
 
-static void feedMessageByte(uint8_t interface_id, uint8_t value) {
-  for (uint8_t i = 0; i < (MSGMAXLEN - 1); i++) {
+static void feedMessageByte(uint8_t interface_id, uint8_t value)
+{
+  for (uint8_t i = 0; i < (MSGMAXLEN - 1); i++)
+  {
     MsgBuffer[i] = MsgBuffer[i + 1];
   }
   MsgBuffer[MSGMAXLEN - 1] = value;
@@ -28,30 +31,39 @@ static void feedMessageByte(uint8_t interface_id, uint8_t value) {
 
 bool NetworkBegin()
 {
-  WiFi.mode(WIFI_AP);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  String suffix = String((uint32_t)(ESP.getEfuseMac() & 0xFFFF), HEX);
-  suffix.toUpperCase();
-  String apName = String("JJROBOTS_ESP32_") + suffix;
+  Serial.print("Connecting to Wi-Fi SSID: ");
+  Serial.println(WIFI_SSID);
 
-  if (!WiFi.softAP(apName.c_str(), WIFI_PASSWORD)) {
-    Serial.println("WiFi AP start failed");
+  uint32_t start_time = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - start_time) < WIFI_CONNECT_TIMEOUT_MS)
+  {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("Wi-Fi connection failed");
     return false;
   }
 
   commandUdp.begin(COMMAND_PORT);
 
-  Serial.print("WiFi AP SSID: ");
-  Serial.println(apName);
-  Serial.print("WiFi AP IP: ");
-  Serial.println(WiFi.softAPIP());
+  Serial.print("Wi-Fi connected. IP: ");
+  Serial.println(WiFi.localIP());
   Serial.print("WiFi UDP port: ");
   Serial.println(COMMAND_PORT);
   return true;
 }
 
-int32_t ExtractParamInt4b(uint8_t pos) {
-  union {
+int32_t ExtractParamInt4b(uint8_t pos)
+{
+  union
+  {
     unsigned char Buff[4];
     int32_t d;
   } u;
@@ -62,8 +74,10 @@ int32_t ExtractParamInt4b(uint8_t pos) {
   return u.d;
 }
 
-int16_t ExtractParamInt2b(uint8_t pos) {
-  union {
+int16_t ExtractParamInt2b(uint8_t pos)
+{
+  union
+  {
     unsigned char Buff[2];
     int16_t d;
   } u;
@@ -72,42 +86,52 @@ int16_t ExtractParamInt2b(uint8_t pos) {
   return u.d;
 }
 
-int32_t ExtractParamString6b(uint8_t pos) {
+int32_t ExtractParamString6b(uint8_t pos)
+{
   char Buff[7];
 
-  for (uint8_t i = 0; i < 6; i++) {
+  for (uint8_t i = 0; i < 6; i++)
+  {
     Buff[i] = (char)MsgBuffer[pos + i];
   }
   Buff[6] = 0;
   return atoi(Buff);
 }
 
-void MsgRead() {
+void MsgRead()
+{
   int packetSize = commandUdp.parsePacket();
-  while (packetSize > 0) {
-    while (commandUdp.available() > 0) {
+  while (packetSize > 0)
+  {
+    while (commandUdp.available() > 0)
+    {
       feedMessageByte(1, (uint8_t)commandUdp.read());
     }
     packetSize = commandUdp.parsePacket();
   }
 }
 
-void USBMsgRead() {
-  while (Serial.available() > 0) {
+void USBMsgRead()
+{
+  while (Serial.available() > 0)
+  {
     feedMessageByte(0, (uint8_t)Serial.read());
   }
 }
 
-void ParseMsg(uint8_t interface) {
+void ParseMsg(uint8_t interface)
+{
   (void)interface;
 
-  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'H')) {
+  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'H'))
+  {
     Serial.println("->MSG: JJAH: STOP ACTIVE MOVEMENT");
     emitCommand({COMMAND_STOP_ACTIVE_MOVEMENT, 0.0f, 0.0f, 0, 0});
     return;
   }
 
-  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'T')) {
+  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'T'))
+  {
     Serial.print("->MSG: JJAT:");
     int32_t axis1_value = ExtractParamString6b(4);
     int32_t axis2_value = ExtractParamString6b(11);
@@ -118,7 +142,8 @@ void ParseMsg(uint8_t interface) {
     return;
   }
 
-  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'M')) {
+  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'M'))
+  {
     Serial.print("->MSG: JJAM:");
     int16_t axis1_value = ExtractParamInt2b(4);
     int16_t axis2_value = ExtractParamInt2b(6);
@@ -132,7 +157,8 @@ void ParseMsg(uint8_t interface) {
     return;
   }
 
-  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'S')) {
+  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'S'))
+  {
     Serial.print("->MSG: JJAS:");
     int16_t speed_percent = ExtractParamInt2b(4);
     int16_t acceleration_percent = ExtractParamInt2b(8);
@@ -147,13 +173,15 @@ void ParseMsg(uint8_t interface) {
     return;
   }
 
-  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'C')) {
+  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'C'))
+  {
     Serial.println("->MSG: JJAC:");
     emitCommand({COMMAND_ZERO_CURRENT_POSITION, 0.0f, 0.0f, 0, 0});
     return;
   }
 
-  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'E')) {
+  if ((char(MsgBuffer[0]) == 'J') && (char(MsgBuffer[1]) == 'J') && (char(MsgBuffer[2]) == 'A') && (char(MsgBuffer[3]) == 'E'))
+  {
     Serial.println("->MSG: JJAE:");
     emitCommand({COMMAND_EMERGENCY_STOP, 0.0f, 0.0f, 0, 0});
     return;

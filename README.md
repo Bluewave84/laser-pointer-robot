@@ -2,11 +2,18 @@
 
 ## Microcontroller commands
 
-The ESP32 accepts commands over USB serial at `115200` baud and over UDP while running its Wi-Fi access point.
+The ESP32 accepts commands over USB serial at `115200` baud and over UDP after connecting to an existing Wi-Fi network.
 
-- Wi-Fi SSID: `JJROBOTS_ESP32_<suffix>`
-- Wi-Fi password: `87654321`
-- UDP target: `192.168.4.1:2222`
+Create `src/Laser_Pointer_Robot/secrets.h` with your local Wi-Fi credentials. This file is ignored by git.
+
+```cpp
+#pragma once
+
+static const char *WIFI_SSID = "your-wifi-ssid";
+static const char *WIFI_PASSWORD = "your-wifi-password";
+```
+
+- UDP target: the IP address printed by the ESP32 at startup, port `2222`
 
 Commands are framed with the ASCII prefix `JJA` followed by a one-letter command code. Multi-byte integer parameters are sent big-endian.
 
@@ -24,7 +31,7 @@ Example: move axis 1 to `9.00` degrees and axis 2 to `-4.50` degrees over UDP fr
 ```powershell
 $udp = [System.Net.Sockets.UdpClient]::new()
 $bytes = [System.Text.Encoding]::ASCII.GetBytes("JJAT+00900,-00450")
-$udp.Send($bytes, $bytes.Length, "192.168.4.1", 2222)
+$udp.Send($bytes, $bytes.Length, "<esp32-ip-address>", 2222)
 $udp.Close()
 ```
 
