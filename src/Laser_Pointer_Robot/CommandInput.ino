@@ -10,6 +10,10 @@ static WiFiUDP commandUdp;
 static const uint16_t COMMAND_PORT = 2222;
 static const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
 static const uint8_t MESSAGE_FRAME_BUFFER_LENGTH = 20;
+static const uint8_t CONTROL_MESSAGE_FRAME_LENGTH = 4;
+static const uint8_t TEXT_AXIS_TARGET_MESSAGE_FRAME_LENGTH = 17;
+static const uint8_t BINARY_AXIS_TARGET_MESSAGE_FRAME_LENGTH = 20;
+static const uint8_t MOTION_LIMITS_MESSAGE_FRAME_LENGTH = 14;
 
 static bool udp_transport_enabled = false;
 static RobotCommand pending_command = {COMMAND_NONE, 0.0f, 0.0f, 0, 0};
@@ -62,28 +66,33 @@ static int32_t extractParamString6b(uint8_t pos)
     return atoi(Buff);
 }
 
-static bool messageFrameMatches(char command_code)
+static bool messageFrameMatches(uint8_t frame_start, char command_code)
 {
-    return (char(message_frame_buffer[0]) == 'J') &&
-           (char(message_frame_buffer[1]) == 'J') &&
-           (char(message_frame_buffer[2]) == 'A') &&
-           (char(message_frame_buffer[3]) == command_code);
+    return (char(message_frame_buffer[frame_start]) == 'J') &&
+           (char(message_frame_buffer[frame_start + 1]) == 'J') &&
+           (char(message_frame_buffer[frame_start + 2]) == 'A') &&
+           (char(message_frame_buffer[frame_start + 3]) == command_code);
 }
 
 static void parseMessageFrame()
 {
-    if (messageFrameMatches('H'))
+    const uint8_t control_frame_start = MESSAGE_FRAME_BUFFER_LENGTH - CONTROL_MESSAGE_FRAME_LENGTH;
+    const uint8_t text_axis_target_frame_start = MESSAGE_FRAME_BUFFER_LENGTH - TEXT_AXIS_TARGET_MESSAGE_FRAME_LENGTH;
+    const uint8_t binary_axis_target_frame_start = MESSAGE_FRAME_BUFFER_LENGTH - BINARY_AXIS_TARGET_MESSAGE_FRAME_LENGTH;
+    const uint8_t motion_limits_frame_start = MESSAGE_FRAME_BUFFER_LENGTH - MOTION_LIMITS_MESSAGE_FRAME_LENGTH;
+
+    if (messageFrameMatches(control_frame_start, 'H'))
     {
         Serial.println("->MSG: JJAH: STOP ACTIVE MOVEMENT");
         emitCommand({COMMAND_STOP_ACTIVE_MOVEMENT, 0.0f, 0.0f, 0, 0});
         return;
     }
 
-    if (messageFrameMatches('T'))
+    if (messageFrameMatches(text_axis_target_frame_start, 'T'))
     {
         Serial.print("->MSG: JJAT:");
-        int32_t axis1_value = extractParamString6b(4);
-        int32_t axis2_value = extractParamString6b(11);
+        int32_t axis1_value = extractParamString6b(text_axis_target_frame_start + 4);
+        int32_t axis2_value = extractParamString6b(text_axis_target_frame_start + 11);
         Serial.print(axis1_value);
         Serial.print(" ");
         Serial.println(axis2_value);
@@ -91,12 +100,12 @@ static void parseMessageFrame()
         return;
     }
 
-    if (messageFrameMatches('M'))
+    if (messageFrameMatches(binary_axis_target_frame_start, 'M'))
     {
         Serial.print("->MSG: JJAM:");
-        int16_t axis1_value = extractParamInt2b(4);
-        int16_t axis2_value = extractParamInt2b(6);
-        int16_t first_unused_value = extractParamInt2b(8);
+        int16_t axis1_value = extractParamInt2b(binary_axis_target_frame_start + 4);
+        int16_t axis2_value = extractParamInt2b(binary_axis_target_frame_start + 6);
+        int16_t first_unused_value = extractParamInt2b(binary_axis_target_frame_start + 8);
         Serial.print(axis1_value);
         Serial.print(" ");
         Serial.print(axis2_value);
@@ -106,12 +115,12 @@ static void parseMessageFrame()
         return;
     }
 
-    if (messageFrameMatches('S'))
+    if (messageFrameMatches(motion_limits_frame_start, 'S'))
     {
         Serial.print("->MSG: JJAS:");
-        int16_t speed_percent = extractParamInt2b(4);
-        int16_t acceleration_percent = extractParamInt2b(8);
-        int16_t trajectory_speed = extractParamInt2b(12);
+        int16_t speed_percent = extractParamInt2b(motion_limits_frame_start + 4);
+        int16_t acceleration_percent = extractParamInt2b(motion_limits_frame_start + 8);
+        int16_t trajectory_speed = extractParamInt2b(motion_limits_frame_start + 12);
         Serial.print(" SPEED XY:");
         Serial.print(speed_percent);
         Serial.print(" ACC XY:");
@@ -122,14 +131,14 @@ static void parseMessageFrame()
         return;
     }
 
-    if (messageFrameMatches('C'))
+    if (messageFrameMatches(control_frame_start, 'C'))
     {
         Serial.println("->MSG: JJAC:");
         emitCommand({COMMAND_ZERO_CURRENT_POSITION, 0.0f, 0.0f, 0, 0});
         return;
     }
 
-    if (messageFrameMatches('E'))
+    if (messageFrameMatches(control_frame_start, 'E'))
     {
         Serial.println("->MSG: JJAE:");
         emitCommand({COMMAND_EMERGENCY_STOP, 0.0f, 0.0f, 0, 0});
