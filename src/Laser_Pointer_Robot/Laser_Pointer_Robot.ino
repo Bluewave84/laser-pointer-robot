@@ -39,12 +39,27 @@ void setup() {
   Serial.println(CNC_ENABLE_PIN);
 
   beginCommandInput();
-  initializeMotionHardware();
-
-  position_M1 = ROBOT_INITIAL_POSITION_M1 * M1_AXIS_STEPS_PER_UNIT;
-  position_M2 = ROBOT_INITIAL_POSITION_M2 * M2_AXIS_STEPS_PER_UNIT;
-  target_position_M1 = position_M1;
-  target_position_M2 = position_M2;
+  
+  // Initialize FastAccelStepper engine
+  engine.init();
+  
+  // Configure stepper M1 (X axis)
+  stepper_M1 = engine.stepperConnectToPin(X_STEP_PIN);
+  if (stepper_M1) {
+    stepper_M1->setDirectionPin(X_DIR_PIN);
+    stepper_M1->setMaxSpeed(config_speed_M1);
+    stepper_M1->setAcceleration(config_acceleration_M1);
+    stepper_M1->setCurrentPosition(0);
+  }
+  
+  // Configure stepper M2 (Y axis)
+  stepper_M2 = engine.stepperConnectToPin(Y_STEP_PIN);
+  if (stepper_M2) {
+    stepper_M2->setDirectionPin(Y_DIR_PIN);
+    stepper_M2->setMaxSpeed(config_speed_M2);
+    stepper_M2->setAcceleration(config_acceleration_M2);
+    stepper_M2->setCurrentPosition(0);
+  }
 
   configSpeed(MAX_SPEED_M1, MAX_SPEED_M2);
   configAcceleration(MAX_ACCEL_M1, MAX_ACCEL_M2);
@@ -54,7 +69,6 @@ void setup() {
   digitalWrite(CNC_ENABLE_PIN, LOW);
   digitalWrite(STATUS_LED_PIN, HIGH);
 
-  timer_old = micros();
   slow_timer_old = millis();
   laser_timer_old = millis();
 
@@ -70,10 +84,16 @@ void loop() {
     consumeCommand(command);
   }
 
-  timer_value = micros();
-  dt = (int)(timer_value - timer_old);
-  if (dt >= 1000) {
-    timer_old = timer_value;
-    positionControl(1000);
+  // Call engine to process step timing
+  engine.nextTick();
+  
+  // Check if any motor is still moving
+  if (stepper_M1 && stepper_M2) {
+    bool m1_moving = stepper_M1->isRunning();
+    bool m2_moving = stepper_M2->isRunning();
+    working = m1_moving || m2_moving;
+    
+    // Enable driver if any motor is moving, disable if both idle
+    digitalWrite(CNC_ENABLE_PIN, working ? LOW : HIGH);
   }
 }
