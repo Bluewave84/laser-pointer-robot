@@ -1,6 +1,6 @@
 # Migrate motor control from manual ESP32 timers to FastAccelStepper library
 
-We replaced custom ISR-driven stepper control (using `esp_timer` callbacks at 31kHz) with the FastAccelStepper library, which runs from the main loop via `engine->nextTick()` every iteration. This shift eliminates manual acceleration/deceleration logic, simplifies the control model, and leverages a battle-tested motion profile algorithm optimized for ESP32's GPIO performance.
+We replaced custom ISR-driven stepper control (using `esp_timer` callbacks at 31kHz) with the FastAccelStepper library. This shift eliminates manual acceleration/deceleration logic, simplifies the control model, and leverages a battle-tested motion profile algorithm optimized for ESP32's GPIO performance.
 
 ## Status
 
@@ -23,11 +23,11 @@ We chose FastAccelStepper because it balances performance (fast GPIO writes for 
 
 **Changes to motion behavior:**
 - Built-in S-curve deceleration replaces custom overshoot compensation (look-ahead prevents overshooting)
-- Acceleration profile is library-controlled (cannot be customized at runtime, only via `setMaxSpeed()/setAcceleration()`)
+- Acceleration profile is library-controlled (cannot be customized at runtime, only via `setSpeedInHz()/setAcceleration()`)
 - Motion state is library-owned; commands are no longer shadowed by a separate control loop
 
 **I/O assumptions:**
-- Main loop calls `engine->nextTick()` without throttling; library manages timing via `micros()`
+- Motion execution is interrupt/task-driven by FastAccelStepper once moves are queued
 - Non-blocking command input is required (already satisfied by WiFi UDP and serial polling)
 
 **Integration points:**

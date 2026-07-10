@@ -72,13 +72,18 @@ void configAcceleration(int target_acc1, int target_acc2) {
 }
 
 void setSpeedAcc() {
+  const int32_t target_position_m1 = (int32_t)(target_angleA1 * M1_AXIS_STEPS_PER_UNIT);
+  const int32_t target_position_m2 = (int32_t)(target_angleA2 * M2_AXIS_STEPS_PER_UNIT);
+
   if (stepper_M1) {
-    stepper_M1->setMaxSpeed(config_speed_M1);
+    stepper_M1->setSpeedInHz(config_speed_M1);
     stepper_M1->setAcceleration(config_acceleration_M1);
+    stepper_M1->moveTo(target_position_m1);
   }
   if (stepper_M2) {
-    stepper_M2->setMaxSpeed(config_speed_M2);
+    stepper_M2->setSpeedInHz(config_speed_M2);
     stepper_M2->setAcceleration(config_acceleration_M2);
+    stepper_M2->moveTo(target_position_m2);
   }
 }
 
