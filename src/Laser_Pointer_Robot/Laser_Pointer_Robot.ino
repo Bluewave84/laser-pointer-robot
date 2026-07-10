@@ -47,7 +47,7 @@ void setup() {
   stepper_M1 = engine.stepperConnectToPin(X_STEP_PIN);
   if (stepper_M1) {
     stepper_M1->setDirectionPin(X_DIR_PIN);
-    stepper_M1->setMaxSpeed(config_speed_M1);
+    stepper_M1->setSpeedInHz(config_speed_M1);
     stepper_M1->setAcceleration(config_acceleration_M1);
     stepper_M1->setCurrentPosition(0);
   }
@@ -56,7 +56,7 @@ void setup() {
   stepper_M2 = engine.stepperConnectToPin(Y_STEP_PIN);
   if (stepper_M2) {
     stepper_M2->setDirectionPin(Y_DIR_PIN);
-    stepper_M2->setMaxSpeed(config_speed_M2);
+    stepper_M2->setSpeedInHz(config_speed_M2);
     stepper_M2->setAcceleration(config_acceleration_M2);
     stepper_M2->setCurrentPosition(0);
   }
@@ -84,9 +84,6 @@ void loop() {
     consumeCommand(command);
   }
 
-  // Call engine to process step timing
-  engine.nextTick();
-  
   // Check if any motor is still moving
   if (stepper_M1 && stepper_M2) {
     bool m1_moving = stepper_M1->isRunning();
