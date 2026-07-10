@@ -1,5 +1,9 @@
 # laser-pointer-robot
 
+## Build dependencies
+
+Install the **FastAccelStepper** library via the Arduino IDE Library Manager (Sketch > Include Library > Manage Libraries, search for "FastAccelStepper" by Peter Dannegger).
+
 ## Microcontroller commands
 
 The ESP32 accepts commands over USB serial at `115200` baud and over UDP after connecting to an existing Wi-Fi network.

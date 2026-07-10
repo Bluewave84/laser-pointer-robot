@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <math.h>
+#include <FastAccelStepper.h>
 
 #define ROBOT_ABSOLUTE_MAX_M1 121
 #define ROBOT_ABSOLUTE_MAX_M2 142
@@ -79,9 +80,6 @@ int16_t slow_loop_counter;
 long timeout_counter;
 long wait_counter;
 int16_t timestamp = 0;
-int dt;
-long timer_old;
-long timer_value;
 long slow_timer_old;
 long slow_timer_value;
 long laser_timer_old;
@@ -89,37 +87,21 @@ long laser_timer_value;
 int debug_counter;
 bool enable_udp_output = false;
 
-volatile int32_t position_M1;
-volatile int32_t position_M2;
-bool working = false;
-bool M1stopping = false;
-bool M2stopping = false;
+// FastAccelStepper engine and stepper objects
+FastAccelStepperEngine engine = FastAccelStepperEngine();
+FastAccelStepper *stepper_M1 = nullptr;
+FastAccelStepper *stepper_M2 = nullptr;
 
-int8_t dir_M1 = 0;
-int8_t dir_M2 = 0;
+bool working = false;
+
 float target_angleA1 = 0;
 float target_angleA2 = 0;
-int32_t target_position_M1 = 0;
-int32_t target_position_M2 = 0;
-int32_t diff_M1 = 0;
-int32_t diff_M2 = 0;
-int32_t speed_M1 = 0;
-int32_t speed_M2 = 0;
+
 int32_t config_speed_M1 = MAX_SPEED_M1;
 int32_t config_speed_M2 = MAX_SPEED_M2;
-int32_t target_speed_M1 = MAX_SPEED_M1;
-int32_t target_speed_M2 = MAX_SPEED_M2;
 
-int32_t acceleration_M1 = MAX_ACCEL_M1;
-int32_t acceleration_M2 = MAX_ACCEL_M2;
 int32_t config_acceleration_M1 = MAX_ACCEL_M1;
 int32_t config_acceleration_M2 = MAX_ACCEL_M2;
-int32_t target_acceleration_M1 = MAX_ACCEL_M1;
-int32_t target_acceleration_M2 = MAX_ACCEL_M2;
-
-int32_t pos_stop_M1 = 0;
-int32_t pos_stop_M2 = 0;
-int16_t overshoot_compensation = 20;
 
 float actual_angleA1 = 0;
 float actual_angleA2 = 0;
@@ -136,22 +118,4 @@ bool emergency_stop_active = false;
 int16_t myAbs(int16_t param)
 {
   return (param < 0) ? -param : param;
-}
-
-long myAbsLong(long param)
-{
-  return (param < 0) ? -param : param;
-}
-
-int sign(int32_t val)
-{
-  if (val < 0)
-  {
-    return -1;
-  }
-  if (val > 0)
-  {
-    return 1;
-  }
-  return 0;
 }
