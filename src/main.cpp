@@ -28,6 +28,10 @@ constexpr uint16_t MOTOR_RMS_CURRENT_MA = 400;
 constexpr uint32_t STALLGUARD_TCOOLTHRS = 0xFFFFF;
 constexpr uint8_t STALLGUARD_SGTHRS = 45;
 
+// If range (given in full steps) is known, set these values to avoid a range test. Zero keeps the sketch in a safe idle state.
+constexpr uint32_t X_AXIS_RANGE_FULLSTEP = 512;
+constexpr uint32_t Y_AXIS_RANGE_FULLSTEP = 704;
+
 constexpr uint16_t MICROSTEPS = 8;
 constexpr uint32_t HOMING_SPEED_HZ = 800;
 constexpr uint32_t HOMING_ACCELERATION = 1600;
@@ -249,6 +253,40 @@ bool allAxisRangesKnown()
     return axisRangeIsKnown(xAxis) && axisRangeIsKnown(yAxis);
 }
 
+int32_t configuredAxisRangeSteps(const Axis &axis)
+{
+    const uint32_t configuredFullSteps = (&axis == &xAxis) ? X_AXIS_RANGE_FULLSTEP : Y_AXIS_RANGE_FULLSTEP;
+    if (configuredFullSteps == 0)
+    {
+        return 0;
+    }
+
+    return static_cast<int32_t>(configuredFullSteps * MICROSTEPS);
+}
+
+void finishCurrentAxisHoming()
+{
+    disableAxis();
+    homingState = HomingState::Idle;
+    Serial.print(F("Homing complete. Range 0.."));
+    Serial.print(activeAxis->axisRangeSteps);
+    Serial.print(F(" steps, final position="));
+    Serial.println(currentStepper()->getCurrentPosition());
+
+    if (activeAxis == &xAxis)
+    {
+        activeAxis = &yAxis;
+        clearDiagEdge();
+        resetStallConfirmation();
+        lastDiagnosticMs = 0;
+        homingPhase = HomingPhase::FindZero;
+        homingState = HomingState::Arming;
+        Serial.println(F("Homing: starting Y axis."));
+        Serial.println(F("Homing: arming before seeking zero end."));
+        startMove(ARMING_STEPS);
+    }
+}
+
 int32_t safeMinPosition()
 {
     return 0;
@@ -322,6 +360,31 @@ void beginHoming()
     xAxis.axisRangeSteps = 0;
     yAxis.physicalAxisRangeSteps = 0;
     yAxis.axisRangeSteps = 0;
+
+    xAxis.axisRangeSteps = configuredAxisRangeSteps(xAxis);
+    if (xAxis.axisRangeSteps > 0)
+    {
+        Serial.print(F("Homing: X configured range set to 0.."));
+        Serial.print(xAxis.axisRangeSteps);
+        Serial.println(F(" steps (FindMax will be skipped)."));
+    }
+    else
+    {
+        Serial.println(F("Homing: X range unknown; full FindZero + FindMax homing will run."));
+    }
+
+    yAxis.axisRangeSteps = configuredAxisRangeSteps(yAxis);
+    if (yAxis.axisRangeSteps > 0)
+    {
+        Serial.print(F("Homing: Y configured range set to 0.."));
+        Serial.print(yAxis.axisRangeSteps);
+        Serial.println(F(" steps (FindMax will be skipped)."));
+    }
+    else
+    {
+        Serial.println(F("Homing: Y range unknown; full FindZero + FindMax homing will run."));
+    }
+
     activeAxis = &xAxis;
     homingPhase = HomingPhase::FindZero;
     homingState = HomingState::Arming;
@@ -555,6 +618,18 @@ void updateHoming()
     {
         if (homingPhase == HomingPhase::FindZero)
         {
+            if (axisRangeIsKnown(*activeAxis))
+            {
+                currentStepper()->setCurrentPosition(0);
+                Serial.print(F("Homing: using configured upper limit for axis "));
+                Serial.print(activeAxis->name);
+                Serial.print(F(". Max position set to "));
+                Serial.print(activeAxis->axisRangeSteps);
+                Serial.println(F(" steps; FindMax skipped."));
+                finishCurrentAxisHoming();
+                return;
+            }
+
             homingPhase = HomingPhase::FindMax;
             lastDiagnosticMs = 0;
             Serial.print(F("Homing: zero backoff position="));
@@ -578,28 +653,13 @@ void updateHoming()
 
     if (homingState == HomingState::MovingToMinimum && !currentStepper()->isRunning())
     {
-        activeAxis->axisRangeSteps = activeAxis->physicalAxisRangeSteps - (BACKOFF_STEPS * 2);
+        if (!axisRangeIsKnown(*activeAxis))
+        {
+            activeAxis->axisRangeSteps = activeAxis->physicalAxisRangeSteps - (BACKOFF_STEPS * 2);
+        }
         currentStepper()->setCurrentPosition(0);
 
-        disableAxis();
-        homingState = HomingState::Idle;
-        Serial.print(F("Homing complete. Range 0.."));
-        Serial.print(activeAxis->axisRangeSteps);
-        Serial.print(F(" steps, final position="));
-        Serial.println(currentStepper()->getCurrentPosition());
-
-        if (activeAxis == &xAxis)
-        {
-            activeAxis = &yAxis;
-            clearDiagEdge();
-            resetStallConfirmation();
-            lastDiagnosticMs = 0;
-            homingPhase = HomingPhase::FindZero;
-            homingState = HomingState::Arming;
-            Serial.println(F("Homing: starting Y axis."));
-            Serial.println(F("Homing: arming before seeking zero end."));
-            startMove(ARMING_STEPS);
-        }
+        finishCurrentAxisHoming();
     }
 }
 
@@ -669,7 +729,7 @@ bool setupAxisMotion(Axis &axis)
 
 bool setupMotion()
 {
-    engine.init(0);
+    engine.init();
     return setupAxisMotion(xAxis) && setupAxisMotion(yAxis);
 }
 
