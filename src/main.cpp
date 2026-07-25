@@ -45,6 +45,10 @@ constexpr int32_t SEEK_SETTLE_STEPS = 800;
 constexpr uint32_t RANGE_TEST_SPEED_HZ = 8000;
 constexpr uint32_t RANGE_TEST_ACCELERATION = 16000;
 constexpr uint8_t RANGE_TEST_CYCLES = 4;
+constexpr uint32_t PATTERN_TEST_SPEED_HZ = 4800;
+constexpr uint32_t PATTERN_TEST_ACCELERATION = 12000;
+constexpr uint8_t PATTERN_TEST_DEFAULT_LOOPS = 2;
+constexpr uint8_t PATTERN_MARGIN_PERCENT = 8;
 
 HardwareSerial &tmcSerial = Serial1;
 TMC2209Stepper xDriver(&tmcSerial, R_SENSE_OHMS, X_TMC_ADDRESS);
@@ -97,6 +101,79 @@ uint8_t rangeTestLegsRemaining = 0;
 bool rangeTestMoveTowardMax = false;
 Axis *rangeTestAxis = nullptr;
 
+enum class PatternKind
+{
+    Square,
+    Diamond,
+    Figure8,
+    Spiral,
+};
+
+struct PatternWaypoint
+{
+    uint8_t xPercent;
+    uint8_t yPercent;
+    uint16_t dwellMs;
+};
+
+bool patternTestActive = false;
+PatternKind activePattern = PatternKind::Square;
+uint8_t patternWaypointIndex = 0;
+uint8_t patternLoopsRemaining = 0;
+uint32_t patternDwellStartMs = 0;
+bool patternDwellActive = false;
+
+const PatternWaypoint squarePattern[] = {
+    {0, 0, 120},
+    {100, 0, 120},
+    {100, 100, 120},
+    {0, 100, 120},
+};
+
+const PatternWaypoint diamondPattern[] = {
+    {50, 0, 120},
+    {100, 50, 120},
+    {50, 100, 120},
+    {0, 50, 120},
+};
+
+const PatternWaypoint figure8Pattern[] = {
+    {20, 50, 0},
+    {35, 30, 0},
+    {50, 20, 0},
+    {65, 30, 0},
+    {80, 50, 0},
+    {65, 70, 0},
+    {50, 80, 0},
+    {35, 70, 0},
+    {20, 50, 80},
+    {35, 70, 0},
+    {50, 60, 0},
+    {65, 70, 0},
+    {80, 50, 0},
+    {65, 30, 0},
+    {50, 40, 0},
+    {35, 30, 0},
+};
+
+const PatternWaypoint spiralPattern[] = {
+    {50, 50, 0},
+    {60, 50, 0},
+    {60, 60, 0},
+    {40, 60, 0},
+    {40, 40, 0},
+    {70, 40, 0},
+    {70, 70, 0},
+    {30, 70, 0},
+    {30, 30, 0},
+    {80, 30, 0},
+    {80, 80, 0},
+    {20, 80, 0},
+    {20, 20, 0},
+    {50, 20, 0},
+    {50, 50, 160},
+};
+
 FastAccelStepper *currentStepper()
 {
     return *activeAxis->stepper;
@@ -108,6 +185,51 @@ TMC2209Stepper &currentDriver()
 }
 
 void startNextRangeTestLeg();
+void printPatternHelp();
+void updatePatternTest();
+
+const char *patternName(PatternKind pattern)
+{
+    switch (pattern)
+    {
+    case PatternKind::Square:
+        return "Square";
+    case PatternKind::Diamond:
+        return "Diamond";
+    case PatternKind::Figure8:
+        return "Figure-8";
+    case PatternKind::Spiral:
+        return "Spiral";
+    }
+
+    return "Unknown";
+}
+
+void patternData(PatternKind pattern, const PatternWaypoint *&waypoints, uint8_t &count)
+{
+    switch (pattern)
+    {
+    case PatternKind::Square:
+        waypoints = squarePattern;
+        count = static_cast<uint8_t>(sizeof(squarePattern) / sizeof(squarePattern[0]));
+        return;
+    case PatternKind::Diamond:
+        waypoints = diamondPattern;
+        count = static_cast<uint8_t>(sizeof(diamondPattern) / sizeof(diamondPattern[0]));
+        return;
+    case PatternKind::Figure8:
+        waypoints = figure8Pattern;
+        count = static_cast<uint8_t>(sizeof(figure8Pattern) / sizeof(figure8Pattern[0]));
+        return;
+    case PatternKind::Spiral:
+        waypoints = spiralPattern;
+        count = static_cast<uint8_t>(sizeof(spiralPattern) / sizeof(spiralPattern[0]));
+        return;
+    }
+
+    waypoints = squarePattern;
+    count = static_cast<uint8_t>(sizeof(squarePattern) / sizeof(squarePattern[0]));
+}
 
 void IRAM_ATTR onDiagRising()
 {
@@ -208,6 +330,19 @@ void disableAxis()
     }
 }
 
+void disableAllAxes()
+{
+    if (xStepper != nullptr)
+    {
+        xStepper->disableOutputs();
+    }
+
+    if (yStepper != nullptr)
+    {
+        yStepper->disableOutputs();
+    }
+}
+
 void failHoming(const __FlashStringHelper *reason)
 {
     if (currentStepper() != nullptr && currentStepper()->isRunning())
@@ -251,6 +386,169 @@ bool axisRangeIsKnown(const Axis &axis)
 bool allAxisRangesKnown()
 {
     return axisRangeIsKnown(xAxis) && axisRangeIsKnown(yAxis);
+}
+
+int32_t axisPositionFromPercent(const Axis &axis, uint8_t percent)
+{
+    const int32_t axisRange = axis.axisRangeSteps;
+    if (axisRange <= 0)
+    {
+        return 0;
+    }
+
+    int32_t marginSteps = static_cast<int32_t>((static_cast<uint32_t>(axisRange) * PATTERN_MARGIN_PERCENT) / 100U);
+    if (marginSteps < 0)
+    {
+        marginSteps = 0;
+    }
+
+    int32_t minPos = marginSteps;
+    int32_t maxPos = axisRange - marginSteps;
+    if (maxPos < minPos)
+    {
+        minPos = 0;
+        maxPos = axisRange;
+    }
+
+    const int32_t travel = maxPos - minPos;
+    return minPos + static_cast<int32_t>((static_cast<int64_t>(travel) * percent) / 100);
+}
+
+bool configurePatternMotionProfile()
+{
+    if (xStepper == nullptr || yStepper == nullptr)
+    {
+        Serial.println(F("Pattern refused: steppers are not initialized."));
+        return false;
+    }
+
+    if (xStepper->setSpeedInHz(PATTERN_TEST_SPEED_HZ) != 0 ||
+        xStepper->setAcceleration(PATTERN_TEST_ACCELERATION) != 0 ||
+        yStepper->setSpeedInHz(PATTERN_TEST_SPEED_HZ) != 0 ||
+        yStepper->setAcceleration(PATTERN_TEST_ACCELERATION) != 0)
+    {
+        Serial.println(F("Pattern refused: invalid pattern speed or acceleration."));
+        return false;
+    }
+
+    return true;
+}
+
+void restoreDefaultMotionProfile()
+{
+    if (xStepper != nullptr)
+    {
+        xStepper->setSpeedInHz(HOMING_SPEED_HZ);
+        xStepper->setAcceleration(HOMING_ACCELERATION);
+    }
+
+    if (yStepper != nullptr)
+    {
+        yStepper->setSpeedInHz(HOMING_SPEED_HZ);
+        yStepper->setAcceleration(HOMING_ACCELERATION);
+    }
+}
+
+void stopPatternTest(const __FlashStringHelper *reason)
+{
+    if (!patternTestActive)
+    {
+        return;
+    }
+
+    patternTestActive = false;
+    patternDwellActive = false;
+    restoreDefaultMotionProfile();
+    disableAllAxes();
+    Serial.print(F("Pattern stopped: "));
+    Serial.println(reason);
+}
+
+bool startPatternMoveToWaypoint(uint8_t index)
+{
+    const PatternWaypoint *waypoints = nullptr;
+    uint8_t waypointCount = 0;
+    patternData(activePattern, waypoints, waypointCount);
+    if (index >= waypointCount)
+    {
+        return false;
+    }
+
+    const int32_t targetX = axisPositionFromPercent(xAxis, waypoints[index].xPercent);
+    const int32_t targetY = axisPositionFromPercent(yAxis, waypoints[index].yPercent);
+
+    if (xStepper->moveTo(targetX) != MOVE_OK)
+    {
+        Serial.println(F("Pattern fault: X moveTo rejected."));
+        stopPatternTest(F("X move rejected"));
+        return false;
+    }
+
+    if (yStepper->moveTo(targetY) != MOVE_OK)
+    {
+        Serial.println(F("Pattern fault: Y moveTo rejected."));
+        stopPatternTest(F("Y move rejected"));
+        return false;
+    }
+
+    Serial.print(F("Pattern "));
+    Serial.print(patternName(activePattern));
+    Serial.print(F(": waypoint "));
+    Serial.print(index + 1);
+    Serial.print(F(" x="));
+    Serial.print(targetX);
+    Serial.print(F(" y="));
+    Serial.println(targetY);
+    return true;
+}
+
+void beginPatternTest(PatternKind pattern)
+{
+    if (rangeTestActive)
+    {
+        Serial.println(F("Pattern refused: range test is active."));
+        return;
+    }
+
+    if (patternTestActive)
+    {
+        Serial.println(F("Pattern is already active."));
+        return;
+    }
+
+    if (homingState != HomingState::Idle)
+    {
+        Serial.println(F("Pattern refused: homing is active or faulted."));
+        return;
+    }
+
+    if (!allAxisRangesKnown())
+    {
+        Serial.println(F("Pattern refused: run homing first so both axis ranges are known."));
+        return;
+    }
+
+    if (!configurePatternMotionProfile())
+    {
+        return;
+    }
+
+    activePattern = pattern;
+    patternWaypointIndex = 0;
+    patternLoopsRemaining = (pattern == PatternKind::Spiral) ? 1 : PATTERN_TEST_DEFAULT_LOOPS;
+    patternDwellStartMs = 0;
+    patternDwellActive = false;
+    patternTestActive = true;
+
+    Serial.print(F("Pattern start: "));
+    Serial.print(patternName(activePattern));
+    Serial.print(F(" loops="));
+    Serial.println(patternLoopsRemaining);
+
+    if (!startPatternMoveToWaypoint(patternWaypointIndex))
+    {
+        stopPatternTest(F("invalid waypoint"));
+    }
 }
 
 int32_t configuredAxisRangeSteps(const Axis &axis)
@@ -335,6 +633,12 @@ void beginHoming()
         return;
     }
 
+    if (patternTestActive)
+    {
+        Serial.println(F("Homing refused: a pattern test is active."));
+        return;
+    }
+
     if (homingState != HomingState::Idle && homingState != HomingState::Fault)
     {
         Serial.println(F("Homing is already active."));
@@ -395,6 +699,20 @@ void beginHoming()
 
 void abortHoming(const __FlashStringHelper *reason)
 {
+    if (patternTestActive)
+    {
+        if (xStepper != nullptr && xStepper->isRunning())
+        {
+            xStepper->forceStop();
+        }
+        if (yStepper != nullptr && yStepper->isRunning())
+        {
+            yStepper->forceStop();
+        }
+        stopPatternTest(reason);
+        return;
+    }
+
     if (rangeTestActive)
     {
         currentStepper()->forceStop();
@@ -508,6 +826,12 @@ void beginRangeTest()
         return;
     }
 
+    if (patternTestActive)
+    {
+        Serial.println(F("Range test refused: pattern test is active."));
+        return;
+    }
+
     if (!allAxisRangesKnown())
     {
         Serial.println(F("Range test refused: run homing first so both axis ranges are known."));
@@ -535,6 +859,78 @@ void updateRangeTest()
     Serial.print(F(": reached position="));
     Serial.println(currentStepper()->getCurrentPosition());
     startNextRangeTestLeg();
+}
+
+void updatePatternTest()
+{
+    if (!patternTestActive)
+    {
+        return;
+    }
+
+    if (xStepper->isRunning() || yStepper->isRunning())
+    {
+        return;
+    }
+
+    const PatternWaypoint *waypoints = nullptr;
+    uint8_t waypointCount = 0;
+    patternData(activePattern, waypoints, waypointCount);
+    if (waypointCount == 0)
+    {
+        stopPatternTest(F("no waypoints"));
+        return;
+    }
+
+    const PatternWaypoint &currentWaypoint = waypoints[patternWaypointIndex];
+    if (currentWaypoint.dwellMs > 0)
+    {
+        if (!patternDwellActive)
+        {
+            patternDwellActive = true;
+            patternDwellStartMs = millis();
+            return;
+        }
+
+        if (millis() - patternDwellStartMs < currentWaypoint.dwellMs)
+        {
+            return;
+        }
+    }
+
+    patternDwellActive = false;
+    patternWaypointIndex++;
+
+    if (patternWaypointIndex >= waypointCount)
+    {
+        if (patternLoopsRemaining > 1)
+        {
+            patternLoopsRemaining--;
+            patternWaypointIndex = 0;
+            Serial.print(F("Pattern "));
+            Serial.print(patternName(activePattern));
+            Serial.print(F(": next loop, remaining="));
+            Serial.println(patternLoopsRemaining);
+        }
+        else
+        {
+            stopPatternTest(F("completed"));
+            return;
+        }
+    }
+
+    startPatternMoveToWaypoint(patternWaypointIndex);
+}
+
+void printPatternHelp()
+{
+    Serial.println(F("Pattern commands:"));
+    Serial.println(F("  c = axis range sweep (existing test)"));
+    Serial.println(F("  1 = square"));
+    Serial.println(F("  2 = diamond"));
+    Serial.println(F("  3 = figure-8"));
+    Serial.println(F("  4 = spiral"));
+    Serial.println(F("  x = abort active homing/range/pattern"));
 }
 
 void updateHoming()
@@ -748,7 +1144,8 @@ void setup()
     }
 
     disableAxis();
-    Serial.println(F("Ready. Send 's' to home, 'c' for range test, 'x' to abort, or 'd' for StallGuard diagnostics."));
+    Serial.println(F("Ready. Send 's' to home, 'c' for range test, '1'-'4' for patterns, 'x' to abort, or 'd' for StallGuard diagnostics."));
+    printPatternHelp();
 }
 
 void loop()
@@ -772,8 +1169,29 @@ void loop()
         {
             beginRangeTest();
         }
+        else if (command == '1')
+        {
+            beginPatternTest(PatternKind::Square);
+        }
+        else if (command == '2')
+        {
+            beginPatternTest(PatternKind::Diamond);
+        }
+        else if (command == '3')
+        {
+            beginPatternTest(PatternKind::Figure8);
+        }
+        else if (command == '4')
+        {
+            beginPatternTest(PatternKind::Spiral);
+        }
+        else if (command == 'p' || command == 'P')
+        {
+            printPatternHelp();
+        }
     }
 
     updateHoming();
     updateRangeTest();
+    updatePatternTest();
 }
