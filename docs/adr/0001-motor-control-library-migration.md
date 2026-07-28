@@ -19,7 +19,7 @@ We chose FastAccelStepper because it balances performance (fast GPIO writes for 
 **Simplifications:**
 - Eliminates ~150 lines of ISR and timer management code
 - Removes manual position, speed, and acceleration state variables
-- Command handlers now directly call `stepper->moveTo()` and library update functions
+- Robot Motion now issues movement through a per-axis Motor adapter that wraps FastAccelStepper runtime calls
 
 **Changes to motion behavior:**
 - Built-in S-curve deceleration replaces custom overshoot compensation (look-ahead prevents overshooting)
@@ -28,9 +28,10 @@ We chose FastAccelStepper because it balances performance (fast GPIO writes for 
 
 **I/O assumptions:**
 - Motion execution is interrupt/task-driven by FastAccelStepper once moves are queued
-- Non-blocking command input is required (already satisfied by WiFi UDP and serial polling)
+- Non-blocking command input is required; the active firmware satisfies this with USB serial polling
 
 **Integration points:**
-- Driver enable pin remains manually managed (shared CNC_ENABLE_PIN for both motors)
-- Direction pin inversion retained via compile-time `#ifdef INVERT_M*_AXIS`
-- Emergency stop uses library's `forceStop()` with a local flag to prevent post-estop commands
+- Driver enable pin remains configured through FastAccelStepper and is shared by both motors
+- Direction pin setup is owned by the Motor adapter from immutable construction-time pin facts
+- Stop/abort paths use the Motor adapter's `forceStop()` operation, which delegates to FastAccelStepper
+- Sensorless homing uses TMC2209 UART `SG_RESULT` sampling through the Motor adapter; DIAG pin interrupts are not part of the current homing design
