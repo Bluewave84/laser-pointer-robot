@@ -2,9 +2,13 @@
 #include <FastAccelStepper.h>
 #include <TMCStepper.h>
 
+#include "HomingStateMachine.h"
+#include "MotorAdapter.h"
+#include "StallDetector.h"
+
 // TMC2209 sensorless homing for UM FeatherS2.
-// This sketch uses a low-to-high DIAG transition after an arming move, not a
-// continuously high DIAG level, so a stale DIAG signal cannot home the axis.
+// This sketch confirms stalls by comparing SG_RESULT, read over UART, to the
+// configured StallGuard threshold.
 
 constexpr uint32_t CONSOLE_BAUD = 115200;
 constexpr uint32_t TMC_UART_BAUD = 115200;
@@ -19,7 +23,6 @@ constexpr uint8_t X_DIR_PIN = 18;
 constexpr uint8_t Y_STEP_PIN = 5;
 constexpr uint8_t Y_DIR_PIN = 6;
 constexpr uint8_t ENN_PIN = 12;
-constexpr uint8_t DIAG_PIN = 10;
 
 // Set these four values from the carrier-board schematic, motor datasheet, and
 // a no-load StallGuard calibration. Zero keeps the sketch in a safe idle state.
@@ -57,49 +60,44 @@ FastAccelStepperEngine engine;
 FastAccelStepper *xStepper = NULL;
 FastAccelStepper *yStepper = NULL;
 
-struct Axis
-{
-    const char *name;
-    TMC2209Stepper *driver;
-    FastAccelStepper **stepper;
-    uint8_t stepPin;
-    uint8_t dirPin;
-    int32_t physicalAxisRangeSteps;
-    int32_t axisRangeSteps;
-};
+Axis xAxis = {"X", 0, 0};
+Axis yAxis = {"Y", 0, 0};
+MotorAdapter xMotor(xAxis, xDriver, xStepper, X_STEP_PIN, X_DIR_PIN);
+MotorAdapter yMotor(yAxis, yDriver, yStepper, Y_STEP_PIN, Y_DIR_PIN);
+MotorAdapter *activeMotor = &xMotor;
 
-Axis xAxis = {"X", &xDriver, &xStepper, X_STEP_PIN, X_DIR_PIN, 0, 0};
-Axis yAxis = {"Y", &yDriver, &yStepper, Y_STEP_PIN, Y_DIR_PIN, 0, 0};
-Axis *activeAxis = &xAxis;
-
-enum class HomingState
-{
-    Idle,
-    Arming,
-    Seeking,
-    StoppingAtStall,
-    BackingOff,
-    MovingToMinimum,
-    Fault,
-};
-
-enum class HomingPhase
-{
-    FindZero,
-    FindMax,
-};
-
-HomingState homingState = HomingState::Idle;
-HomingPhase homingPhase = HomingPhase::FindZero;
-volatile bool diagRisingEdgeSeen = false;
-uint32_t lastDiagnosticMs = 0;
-uint32_t lastStallSampleMs = 0;
-uint8_t stallConfirmSamples = 0;
-int32_t seekStartPosition = 0;
+StallDetector stallDetector(STALL_SAMPLE_INTERVAL_MS, STALL_CONFIRM_SAMPLES, SEEK_SETTLE_STEPS);
 bool rangeTestActive = false;
 uint8_t rangeTestLegsRemaining = 0;
 bool rangeTestMoveTowardMax = false;
-Axis *rangeTestAxis = nullptr;
+MotorAdapter *rangeTestMotor = nullptr;
+bool patternTestActive = false;
+
+void printDriverSample();
+void stopPatternTest(const __FlashStringHelper *reason);
+
+const HomingStateMachineConfig homingConfig = {
+    ARMING_STEPS,
+    MAX_SEEK_STEPS,
+    BACKOFF_STEPS,
+    DIAGNOSTIC_INTERVAL_MS,
+    static_cast<int32_t>(X_AXIS_RANGE_FULLSTEP *MICROSTEPS),
+    static_cast<int32_t>(Y_AXIS_RANGE_FULLSTEP *MICROSTEPS),
+    HOMING_SPEED_HZ,
+    HOMING_ACCELERATION,
+};
+
+HomingStateMachine homing(
+    homingConfig,
+    activeMotor,
+    xMotor,
+    yMotor,
+    stallDetector,
+    rangeTestActive,
+    rangeTestMotor,
+    patternTestActive,
+    printDriverSample,
+    stopPatternTest);
 
 enum class PatternKind
 {
@@ -116,7 +114,6 @@ struct PatternWaypoint
     uint16_t dwellMs;
 };
 
-bool patternTestActive = false;
 PatternKind activePattern = PatternKind::Square;
 uint8_t patternWaypointIndex = 0;
 uint8_t patternLoopsRemaining = 0;
@@ -174,16 +171,6 @@ const PatternWaypoint spiralPattern[] = {
     {50, 50, 160},
 };
 
-FastAccelStepper *currentStepper()
-{
-    return *activeAxis->stepper;
-}
-
-TMC2209Stepper &currentDriver()
-{
-    return *activeAxis->driver;
-}
-
 void startNextRangeTestLeg();
 void printPatternHelp();
 void updatePatternTest();
@@ -231,11 +218,6 @@ void patternData(PatternKind pattern, const PatternWaypoint *&waypoints, uint8_t
     count = static_cast<uint8_t>(sizeof(squarePattern) / sizeof(squarePattern[0]));
 }
 
-void IRAM_ATTR onDiagRising()
-{
-    diagRisingEdgeSeen = true;
-}
-
 bool configurationIsComplete()
 {
     return R_SENSE_OHMS > 0.0f && MOTOR_RMS_CURRENT_MA > 0 &&
@@ -243,133 +225,30 @@ bool configurationIsComplete()
            MAX_SEEK_STEPS > ARMING_STEPS && BACKOFF_STEPS > 0;
 }
 
-void clearDiagEdge()
-{
-    noInterrupts();
-    diagRisingEdgeSeen = false;
-    interrupts();
-}
-
-bool consumeDiagEdge()
-{
-    noInterrupts();
-    const bool edgeSeen = diagRisingEdgeSeen;
-    diagRisingEdgeSeen = false;
-    interrupts();
-    return edgeSeen;
-}
-
-void resetStallConfirmation()
-{
-    lastStallSampleMs = 0;
-    stallConfirmSamples = 0;
-}
-
-bool stallConfirmedBySgResult()
-{
-    if (abs(currentStepper()->getCurrentPosition() - seekStartPosition) < SEEK_SETTLE_STEPS)
-    {
-        resetStallConfirmation();
-        return false;
-    }
-
-    if (millis() - lastStallSampleMs < STALL_SAMPLE_INTERVAL_MS)
-    {
-        return false;
-    }
-
-    lastStallSampleMs = millis();
-    const uint16_t sgResult = currentDriver().SG_RESULT();
-    if (sgResult <= currentDriver().SGTHRS())
-    {
-        stallConfirmSamples++;
-    }
-    else
-    {
-        stallConfirmSamples = 0;
-    }
-
-    return stallConfirmSamples >= STALL_CONFIRM_SAMPLES;
-}
-
 void printDriverSample()
 {
-    Serial.print(F("[SG] diag="));
-    Serial.print(digitalRead(DIAG_PIN));
-    Serial.print(F(" axis="));
-    Serial.print(activeAxis->name);
+    Serial.print(F("[SG] axis="));
+    Serial.print(activeMotor->axisName());
     Serial.print(F(" sg_result="));
-    Serial.print(currentDriver().SG_RESULT());
+    Serial.print(activeMotor->sgResult());
     Serial.print(F(" sgthrs="));
-    Serial.println(currentDriver().SGTHRS());
-}
-
-void printMotionSample()
-{
-    if (millis() - lastDiagnosticMs < DIAGNOSTIC_INTERVAL_MS)
-    {
-        return;
-    }
-
-    lastDiagnosticMs = millis();
-    Serial.print(F("[HOME] position="));
-    Serial.print(currentStepper()->getCurrentPosition());
-    Serial.print(F(" axis="));
-    Serial.print(activeAxis->name);
-    Serial.print(F(" state="));
-    Serial.print(static_cast<uint8_t>(homingState));
-    Serial.print(' ');
-    printDriverSample();
+    Serial.println(activeMotor->sgThreshold());
 }
 
 void disableAxis()
 {
-    if (currentStepper() != nullptr)
-    {
-        currentStepper()->disableOutputs();
-    }
+    activeMotor->disableOutputs();
 }
 
 void disableAllAxes()
 {
-    if (xStepper != nullptr)
-    {
-        xStepper->disableOutputs();
-    }
-
-    if (yStepper != nullptr)
-    {
-        yStepper->disableOutputs();
-    }
-}
-
-void failHoming(const __FlashStringHelper *reason)
-{
-    if (currentStepper() != nullptr && currentStepper()->isRunning())
-    {
-        currentStepper()->forceStop();
-    }
-
-    homingState = HomingState::Fault;
-    Serial.print(F("Homing fault: "));
-    Serial.println(reason);
-    printDriverSample();
-}
-
-bool startMove(int32_t steps)
-{
-    if (currentStepper()->move(steps) != MOVE_OK)
-    {
-        failHoming(F("FastAccelStepper rejected the move"));
-        return false;
-    }
-
-    return true;
+    xMotor.disableOutputs();
+    yMotor.disableOutputs();
 }
 
 bool startMoveTo(int32_t position)
 {
-    if (currentStepper()->moveTo(position) != MOVE_OK)
+    if (!activeMotor->moveTo(position))
     {
         Serial.println(F("Range test fault: FastAccelStepper rejected the moveTo command."));
         return false;
@@ -416,16 +295,14 @@ int32_t axisPositionFromPercent(const Axis &axis, uint8_t percent)
 
 bool configurePatternMotionProfile()
 {
-    if (xStepper == nullptr || yStepper == nullptr)
+    if (!xMotor.isInitialized() || !yMotor.isInitialized())
     {
         Serial.println(F("Pattern refused: steppers are not initialized."));
         return false;
     }
 
-    if (xStepper->setSpeedInHz(PATTERN_TEST_SPEED_HZ) != 0 ||
-        xStepper->setAcceleration(PATTERN_TEST_ACCELERATION) != 0 ||
-        yStepper->setSpeedInHz(PATTERN_TEST_SPEED_HZ) != 0 ||
-        yStepper->setAcceleration(PATTERN_TEST_ACCELERATION) != 0)
+    if (!xMotor.setProfile(PATTERN_TEST_SPEED_HZ, PATTERN_TEST_ACCELERATION) ||
+        !yMotor.setProfile(PATTERN_TEST_SPEED_HZ, PATTERN_TEST_ACCELERATION))
     {
         Serial.println(F("Pattern refused: invalid pattern speed or acceleration."));
         return false;
@@ -436,17 +313,8 @@ bool configurePatternMotionProfile()
 
 void restoreDefaultMotionProfile()
 {
-    if (xStepper != nullptr)
-    {
-        xStepper->setSpeedInHz(HOMING_SPEED_HZ);
-        xStepper->setAcceleration(HOMING_ACCELERATION);
-    }
-
-    if (yStepper != nullptr)
-    {
-        yStepper->setSpeedInHz(HOMING_SPEED_HZ);
-        yStepper->setAcceleration(HOMING_ACCELERATION);
-    }
+    xMotor.setProfile(HOMING_SPEED_HZ, HOMING_ACCELERATION);
+    yMotor.setProfile(HOMING_SPEED_HZ, HOMING_ACCELERATION);
 }
 
 void stopPatternTest(const __FlashStringHelper *reason)
@@ -477,14 +345,14 @@ bool startPatternMoveToWaypoint(uint8_t index)
     const int32_t targetX = axisPositionFromPercent(xAxis, waypoints[index].xPercent);
     const int32_t targetY = axisPositionFromPercent(yAxis, waypoints[index].yPercent);
 
-    if (xStepper->moveTo(targetX) != MOVE_OK)
+    if (!xMotor.moveTo(targetX))
     {
         Serial.println(F("Pattern fault: X moveTo rejected."));
         stopPatternTest(F("X move rejected"));
         return false;
     }
 
-    if (yStepper->moveTo(targetY) != MOVE_OK)
+    if (!yMotor.moveTo(targetY))
     {
         Serial.println(F("Pattern fault: Y moveTo rejected."));
         stopPatternTest(F("Y move rejected"));
@@ -516,7 +384,7 @@ void beginPatternTest(PatternKind pattern)
         return;
     }
 
-    if (homingState != HomingState::Idle)
+    if (!homing.isIdle())
     {
         Serial.println(F("Pattern refused: homing is active or faulted."));
         return;
@@ -551,40 +419,6 @@ void beginPatternTest(PatternKind pattern)
     }
 }
 
-int32_t configuredAxisRangeSteps(const Axis &axis)
-{
-    const uint32_t configuredFullSteps = (&axis == &xAxis) ? X_AXIS_RANGE_FULLSTEP : Y_AXIS_RANGE_FULLSTEP;
-    if (configuredFullSteps == 0)
-    {
-        return 0;
-    }
-
-    return static_cast<int32_t>(configuredFullSteps * MICROSTEPS);
-}
-
-void finishCurrentAxisHoming()
-{
-    disableAxis();
-    homingState = HomingState::Idle;
-    Serial.print(F("Homing complete. Range 0.."));
-    Serial.print(activeAxis->axisRangeSteps);
-    Serial.print(F(" steps, final position="));
-    Serial.println(currentStepper()->getCurrentPosition());
-
-    if (activeAxis == &xAxis)
-    {
-        activeAxis = &yAxis;
-        clearDiagEdge();
-        resetStallConfirmation();
-        lastDiagnosticMs = 0;
-        homingPhase = HomingPhase::FindZero;
-        homingState = HomingState::Arming;
-        Serial.println(F("Homing: starting Y axis."));
-        Serial.println(F("Homing: arming before seeking zero end."));
-        startMove(ARMING_STEPS);
-    }
-}
-
 int32_t safeMinPosition()
 {
     return 0;
@@ -592,154 +426,18 @@ int32_t safeMinPosition()
 
 int32_t safeMaxPosition()
 {
-    return activeAxis->axisRangeSteps;
+    return activeMotor->axisState().axisRangeSteps;
 }
 
-int32_t seekStepsForCurrentPhase()
+bool startRangeTestForMotor(MotorAdapter &motor)
 {
-    return homingPhase == HomingPhase::FindZero ? -MAX_SEEK_STEPS : MAX_SEEK_STEPS;
-}
+    activeMotor = &motor;
+    rangeTestMotor = &motor;
 
-int32_t backoffStepsForCurrentPhase()
-{
-    return homingPhase == HomingPhase::FindZero ? BACKOFF_STEPS : -BACKOFF_STEPS;
-}
-
-void startSeekingCurrentPhase()
-{
-    clearDiagEdge();
-    resetStallConfirmation();
-    seekStartPosition = currentStepper()->getCurrentPosition();
-    homingState = HomingState::Seeking;
-
-    if (homingPhase == HomingPhase::FindZero)
-    {
-        Serial.print(F("Homing: seeking zero end using SG_RESULT threshold. "));
-    }
-    else
-    {
-        Serial.print(F("Homing: seeking max end using SG_RESULT threshold. "));
-    }
-
-    printDriverSample();
-    startMove(seekStepsForCurrentPhase());
-}
-
-void beginHoming()
-{
-    if (rangeTestActive)
-    {
-        Serial.println(F("Homing refused: range test is active."));
-        return;
-    }
-
-    if (patternTestActive)
-    {
-        Serial.println(F("Homing refused: a pattern test is active."));
-        return;
-    }
-
-    if (homingState != HomingState::Idle && homingState != HomingState::Fault)
-    {
-        Serial.println(F("Homing is already active."));
-        return;
-    }
-
-    if (!configurationIsComplete())
-    {
-        Serial.println(F("Set R_SENSE_OHMS, MOTOR_RMS_CURRENT_MA, STALLGUARD_TCOOLTHRS, and STALLGUARD_SGTHRS before homing."));
-        return;
-    }
-
-    if (digitalRead(DIAG_PIN) == HIGH)
-    {
-        Serial.println(F("Homing warning: DIAG is already high before motion; using SG_RESULT instead."));
-        printDriverSample();
-    }
-
-    clearDiagEdge();
-    resetStallConfirmation();
-    lastDiagnosticMs = 0;
-    xAxis.physicalAxisRangeSteps = 0;
-    xAxis.axisRangeSteps = 0;
-    yAxis.physicalAxisRangeSteps = 0;
-    yAxis.axisRangeSteps = 0;
-
-    xAxis.axisRangeSteps = configuredAxisRangeSteps(xAxis);
-    if (xAxis.axisRangeSteps > 0)
-    {
-        Serial.print(F("Homing: X configured range set to 0.."));
-        Serial.print(xAxis.axisRangeSteps);
-        Serial.println(F(" steps (FindMax will be skipped)."));
-    }
-    else
-    {
-        Serial.println(F("Homing: X range unknown; full FindZero + FindMax homing will run."));
-    }
-
-    yAxis.axisRangeSteps = configuredAxisRangeSteps(yAxis);
-    if (yAxis.axisRangeSteps > 0)
-    {
-        Serial.print(F("Homing: Y configured range set to 0.."));
-        Serial.print(yAxis.axisRangeSteps);
-        Serial.println(F(" steps (FindMax will be skipped)."));
-    }
-    else
-    {
-        Serial.println(F("Homing: Y range unknown; full FindZero + FindMax homing will run."));
-    }
-
-    activeAxis = &xAxis;
-    homingPhase = HomingPhase::FindZero;
-    homingState = HomingState::Arming;
-    Serial.println(F("Homing: starting X axis."));
-    Serial.println(F("Homing: arming before seeking zero end."));
-    startMove(ARMING_STEPS);
-}
-
-void abortHoming(const __FlashStringHelper *reason)
-{
-    if (patternTestActive)
-    {
-        if (xStepper != nullptr && xStepper->isRunning())
-        {
-            xStepper->forceStop();
-        }
-        if (yStepper != nullptr && yStepper->isRunning())
-        {
-            yStepper->forceStop();
-        }
-        stopPatternTest(reason);
-        return;
-    }
-
-    if (rangeTestActive)
-    {
-        currentStepper()->forceStop();
-        rangeTestActive = false;
-        rangeTestAxis = nullptr;
-        currentStepper()->setSpeedInHz(HOMING_SPEED_HZ);
-        currentStepper()->setAcceleration(HOMING_ACCELERATION);
-        activeAxis = &xAxis;
-        disableAxis();
-        Serial.print(F("Range test aborted: "));
-        Serial.println(reason);
-        return;
-    }
-
-    failHoming(reason);
-}
-
-bool startRangeTestForAxis(Axis &axis)
-{
-    activeAxis = &axis;
-    rangeTestAxis = &axis;
-
-    if (currentStepper()->setSpeedInHz(RANGE_TEST_SPEED_HZ) != 0 ||
-        currentStepper()->setAcceleration(RANGE_TEST_ACCELERATION) != 0)
+    if (!activeMotor->setProfile(RANGE_TEST_SPEED_HZ, RANGE_TEST_ACCELERATION))
     {
         Serial.print(F("Range test refused for axis "));
-        Serial.print(axis.name);
+        Serial.print(motor.axisName());
         Serial.println(F(": invalid speed or acceleration."));
         return false;
     }
@@ -748,7 +446,7 @@ bool startRangeTestForAxis(Axis &axis)
     rangeTestMoveTowardMax = true;
 
     Serial.print(F("Range test axis "));
-    Serial.print(axis.name);
+    Serial.print(motor.axisName());
     Serial.print(F(": cycling "));
     Serial.print(RANGE_TEST_CYCLES);
     Serial.print(F(" times between "));
@@ -761,26 +459,25 @@ bool startRangeTestForAxis(Axis &axis)
 
 void finishRangeTest()
 {
-    currentStepper()->setSpeedInHz(HOMING_SPEED_HZ);
-    currentStepper()->setAcceleration(HOMING_ACCELERATION);
+    activeMotor->setProfile(HOMING_SPEED_HZ, HOMING_ACCELERATION);
     disableAxis();
     Serial.print(F("Range test axis "));
-    Serial.print(activeAxis->name);
+    Serial.print(activeMotor->axisName());
     Serial.print(F(" complete. Final position="));
-    Serial.println(currentStepper()->getCurrentPosition());
+    Serial.println(activeMotor->position());
 
-    if (rangeTestAxis == &xAxis)
+    if (rangeTestMotor == &xMotor)
     {
         Serial.println(F("Range test: starting Y axis."));
-        if (startRangeTestForAxis(yAxis))
+        if (startRangeTestForMotor(yMotor))
         {
             return;
         }
     }
 
     rangeTestActive = false;
-    rangeTestAxis = nullptr;
-    activeAxis = &xAxis;
+    rangeTestMotor = nullptr;
+    activeMotor = &xMotor;
     Serial.println(F("Range test complete on X and Y."));
 }
 
@@ -794,7 +491,7 @@ void startNextRangeTestLeg()
 
     const int32_t targetPosition = rangeTestMoveTowardMax ? safeMaxPosition() : safeMinPosition();
     Serial.print(F("Range test axis "));
-    Serial.print(activeAxis->name);
+    Serial.print(activeMotor->axisName());
     Serial.print(F(": moving to "));
     Serial.print(targetPosition);
     Serial.print(F(" at speed="));
@@ -820,7 +517,7 @@ void beginRangeTest()
         return;
     }
 
-    if (homingState != HomingState::Idle)
+    if (!homing.isIdle())
     {
         Serial.println(F("Range test refused: homing is active or faulted."));
         return;
@@ -839,25 +536,25 @@ void beginRangeTest()
     }
 
     rangeTestActive = true;
-    if (!startRangeTestForAxis(xAxis))
+    if (!startRangeTestForMotor(xMotor))
     {
         rangeTestActive = false;
-        rangeTestAxis = nullptr;
-        activeAxis = &xAxis;
+        rangeTestMotor = nullptr;
+        activeMotor = &xMotor;
     }
 }
 
 void updateRangeTest()
 {
-    if (!rangeTestActive || currentStepper()->isRunning())
+    if (!rangeTestActive || activeMotor->isRunning())
     {
         return;
     }
 
     Serial.print(F("Range test axis "));
-    Serial.print(activeAxis->name);
+    Serial.print(activeMotor->axisName());
     Serial.print(F(": reached position="));
-    Serial.println(currentStepper()->getCurrentPosition());
+    Serial.println(activeMotor->position());
     startNextRangeTestLeg();
 }
 
@@ -868,7 +565,7 @@ void updatePatternTest()
         return;
     }
 
-    if (xStepper->isRunning() || yStepper->isRunning())
+    if (xMotor.isRunning() || yMotor.isRunning())
     {
         return;
     }
@@ -933,200 +630,19 @@ void printPatternHelp()
     Serial.println(F("  x = abort active homing/range/pattern"));
 }
 
-void updateHoming()
-{
-    if (homingState == HomingState::Idle)
-    {
-        return;
-    }
-
-    if (homingState == HomingState::Fault)
-    {
-        if (!currentStepper()->isRunning())
-        {
-            disableAxis();
-        }
-        return;
-    }
-
-    if (homingState == HomingState::Arming)
-    {
-        if (currentStepper()->isRunning())
-        {
-            return;
-        }
-
-        startSeekingCurrentPhase();
-        return;
-    }
-
-    if (homingState == HomingState::Seeking)
-    {
-        if (!currentStepper()->isRunning())
-        {
-            failHoming(F("maximum seek travel reached without a confirmed StallGuard hit"));
-            return;
-        }
-
-        consumeDiagEdge();
-
-        if (stallConfirmedBySgResult())
-        {
-            Serial.println(F("Homing: StallGuard SG_RESULT threshold accepted."));
-            Serial.print(F("[HOME] accepted_position="));
-            Serial.println(currentStepper()->getCurrentPosition());
-            printDriverSample();
-            currentStepper()->forceStop();
-            homingState = HomingState::StoppingAtStall;
-        }
-
-        printMotionSample();
-        return;
-    }
-
-    if (homingState == HomingState::StoppingAtStall)
-    {
-        if (currentStepper()->isRunning())
-        {
-            return;
-        }
-
-        if (homingPhase == HomingPhase::FindZero)
-        {
-            currentStepper()->setCurrentPosition(0);
-            Serial.println(F("Homing: zero end found at position 0."));
-        }
-        else
-        {
-            activeAxis->physicalAxisRangeSteps = currentStepper()->getCurrentPosition();
-            Serial.print(F("Homing: max end found. Physical range steps="));
-            Serial.println(activeAxis->physicalAxisRangeSteps);
-        }
-
-        clearDiagEdge();
-        homingState = HomingState::BackingOff;
-        Serial.println(F("Homing: backing off from the detected end stop."));
-        startMove(backoffStepsForCurrentPhase());
-        return;
-    }
-
-    if (homingState == HomingState::BackingOff && !currentStepper()->isRunning())
-    {
-        if (homingPhase == HomingPhase::FindZero)
-        {
-            if (axisRangeIsKnown(*activeAxis))
-            {
-                currentStepper()->setCurrentPosition(0);
-                Serial.print(F("Homing: using configured upper limit for axis "));
-                Serial.print(activeAxis->name);
-                Serial.print(F(". Max position set to "));
-                Serial.print(activeAxis->axisRangeSteps);
-                Serial.println(F(" steps; FindMax skipped."));
-                finishCurrentAxisHoming();
-                return;
-            }
-
-            homingPhase = HomingPhase::FindMax;
-            lastDiagnosticMs = 0;
-            Serial.print(F("Homing: zero backoff position="));
-            Serial.println(currentStepper()->getCurrentPosition());
-            startSeekingCurrentPhase();
-            return;
-        }
-
-        if (activeAxis->physicalAxisRangeSteps <= (BACKOFF_STEPS * 2))
-        {
-            failHoming(F("measured range is smaller than both backoff margins"));
-            return;
-        }
-
-        homingState = HomingState::MovingToMinimum;
-        Serial.print(F("Homing: moving to minimum usable position="));
-        Serial.println(BACKOFF_STEPS);
-        startMoveTo(BACKOFF_STEPS);
-        return;
-    }
-
-    if (homingState == HomingState::MovingToMinimum && !currentStepper()->isRunning())
-    {
-        if (!axisRangeIsKnown(*activeAxis))
-        {
-            activeAxis->axisRangeSteps = activeAxis->physicalAxisRangeSteps - (BACKOFF_STEPS * 2);
-        }
-        currentStepper()->setCurrentPosition(0);
-
-        finishCurrentAxisHoming();
-    }
-}
-
-bool configureDriver(Axis &axis)
-{
-    axis.driver->begin();
-
-    if (axis.driver->test_connection() != 0)
-    {
-        Serial.print(axis.name);
-        Serial.println(F(" TMC2209 UART connection failed."));
-        return false;
-    }
-
-    axis.driver->pdn_disable(true);
-    axis.driver->mstep_reg_select(true);
-    axis.driver->toff(4);
-    axis.driver->blank_time(24);
-
-    if (!configurationIsComplete())
-    {
-        Serial.print(axis.name);
-        Serial.println(F(" driver connected. Configuration is incomplete; motion remains disabled."));
-        return true;
-    }
-
-    axis.driver->rms_current(MOTOR_RMS_CURRENT_MA);
-    axis.driver->microsteps(MICROSTEPS);
-    axis.driver->en_spreadCycle(false);
-    axis.driver->TCOOLTHRS(STALLGUARD_TCOOLTHRS);
-    axis.driver->SGTHRS(STALLGUARD_SGTHRS);
-    return true;
-}
-
 bool setupDrivers()
 {
     tmcSerial.begin(TMC_UART_BAUD, SERIAL_8N1, TMC_RX_PIN, TMC_TX_PIN);
-    return configureDriver(xAxis) && configureDriver(yAxis);
-}
-
-bool setupAxisMotion(Axis &axis)
-{
-    *axis.stepper = engine.stepperConnectToPin(axis.stepPin);
-    if (*axis.stepper == nullptr)
-    {
-        Serial.print(axis.name);
-        Serial.println(F(" FastAccelStepper initialization failed."));
-        return false;
-    }
-
-    (*axis.stepper)->setDirectionPin(axis.dirPin, true, 10);
-    (*axis.stepper)->setEnablePin(ENN_PIN, true);
-    (*axis.stepper)->setAutoEnable(true);
-    (*axis.stepper)->setDelayToEnable(2000);
-    (*axis.stepper)->setDelayToDisable(100);
-
-    if ((*axis.stepper)->setSpeedInHz(HOMING_SPEED_HZ) != 0 ||
-        (*axis.stepper)->setAcceleration(HOMING_ACCELERATION) != 0)
-    {
-        Serial.print(axis.name);
-        Serial.println(F(" invalid FastAccelStepper speed or acceleration."));
-        return false;
-    }
-
-    return true;
+    const bool configurationComplete = configurationIsComplete();
+    return xMotor.configureDriver(MOTOR_RMS_CURRENT_MA, MICROSTEPS, STALLGUARD_TCOOLTHRS, STALLGUARD_SGTHRS, configurationComplete) &&
+           yMotor.configureDriver(MOTOR_RMS_CURRENT_MA, MICROSTEPS, STALLGUARD_TCOOLTHRS, STALLGUARD_SGTHRS, configurationComplete);
 }
 
 bool setupMotion()
 {
     engine.init();
-    return setupAxisMotion(xAxis) && setupAxisMotion(yAxis);
+    return xMotor.setupMotion(engine, ENN_PIN, HOMING_SPEED_HZ, HOMING_ACCELERATION) &&
+           yMotor.setupMotion(engine, ENN_PIN, HOMING_SPEED_HZ, HOMING_ACCELERATION);
 }
 
 void setup()
@@ -1134,12 +650,9 @@ void setup()
     Serial.begin(CONSOLE_BAUD);
     delay(500);
 
-    pinMode(DIAG_PIN, INPUT_PULLDOWN);
-    attachInterrupt(digitalPinToInterrupt(DIAG_PIN), onDiagRising, RISING);
-
     if (!setupDrivers() || !setupMotion())
     {
-        homingState = HomingState::Fault;
+        homing.setFaulted();
         return;
     }
 
@@ -1155,11 +668,11 @@ void loop()
         const char command = static_cast<char>(Serial.read());
         if (command == 's' || command == 'S')
         {
-            beginHoming();
+            homing.begin(configurationIsComplete());
         }
         else if (command == 'x' || command == 'X')
         {
-            abortHoming(F("serial abort"));
+            homing.abort(F("serial abort"));
         }
         else if (command == 'd' || command == 'D')
         {
@@ -1191,7 +704,7 @@ void loop()
         }
     }
 
-    updateHoming();
+    homing.update();
     updateRangeTest();
     updatePatternTest();
 }

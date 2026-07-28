@@ -20,29 +20,37 @@ _Avoid_: Channel value, motor step position
 A stepper actuator that moves an axis and is measured by step position.
 _Avoid_: Axis, channel
 
+**Motor Adapter**:
+The responsibility that hides per-axis motor driver and stepper-library details behind movement, position, profile, enablement, and StallGuard sampling operations.
+_Avoid_: Axis, robot state
+
 **Command**:
-A domain intent sent to the laser pointer robot, such as setting an axis target, setting motion limits, zeroing the current position, performing an emergency stop, or sending hello/keep-alive.
-_Avoid_: Message frame, UDP packet, serial input
+A domain intent sent to the laser pointer robot, such as homing, running a range test, running a pattern test, printing diagnostics, or aborting active motion.
+_Avoid_: Serial character, message frame, transport input
 
 **Robot State**:
-The durable operating truth of the robot after commands are consumed, including axis targets, motion limits, emergency-stop state, and current position.
+The durable operating truth of the robot after commands are consumed, including active homing phase, known axis ranges, test activity, fault state, and current motor position.
 _Avoid_: Current command, mode
 
 **Transport**:
 The delivery mechanism that carries commands to the robot.
 _Avoid_: Command
 
-**Message Frame**:
-The byte-level representation of a command on a transport.
-_Avoid_: Command
-
 **Command Input**:
-The responsibility that parses transports and message frames into commands.
+The responsibility that parses transport input, currently single-character USB serial input, into commands.
 _Avoid_: Network, robot motion
 
 **Robot Motion**:
 The responsibility that consumes commands and updates robot state, axis targets, motor positions, timers, and driver enablement.
 _Avoid_: Command input, robot configuration
+
+**Homing**:
+The Robot Motion responsibility that discovers a physical reference and usable axis range by moving an axis until StallGuard reports a stall.
+_Avoid_: Zero current position, range test
+
+**Stall Detection**:
+The responsibility that decides whether a motor has stalled by comparing UART-read `SG_RESULT` values to the configured StallGuard threshold after a settle distance.
+_Avoid_: DIAG pin interrupt, homing state
 
 **Robot Configuration**:
 The responsibility that provides physical configuration and default motion limits.
@@ -55,14 +63,6 @@ _Avoid_: Motion limits, command settings
 **Motion Limits**:
 The adjustable operating constraints used while moving, such as speed and acceleration limits.
 _Avoid_: Physical configuration, hardware facts
-
-**Emergency Stop**:
-An overriding safety state that disables movement and prevents future movement until the robot reboots.
-_Avoid_: Mode, pause, keep-alive, zero current position
-
-**Zero Current Position**:
-A command that declares the robot's current pose to be zero without discovering a physical reference.
-_Avoid_: Calibration, homing
 
 **Stop Active Movement**:
 A command effect that stops the robot's current movement without changing position, motion limits, or emergency-stop state.

@@ -1,42 +1,68 @@
 # laser-pointer-robot
 
-## Build dependencies
+Firmware for a two-axis stepper-driven laser pointer robot on an Unexpected Maker FeatherS2. The active PlatformIO sketch is [src/main.cpp](src/main.cpp); the older Arduino sketch remains under [src/Laser_Pointer_Robot](src/Laser_Pointer_Robot) for now.
 
-Install the **FastAccelStepper** library via the Arduino IDE Library Manager (Sketch > Include Library > Manage Libraries, search for "FastAccelStepper" by Peter Dannegger).
+## Build
 
-## Microcontroller commands
-
-The ESP32 accepts commands over USB serial at `115200` baud and over UDP after connecting to an existing Wi-Fi network.
-
-Create `src/Laser_Pointer_Robot/secrets.h` with your local Wi-Fi credentials. This file is ignored by git.
-
-```cpp
-#pragma once
-
-static const char *WIFI_SSID = "your-wifi-ssid";
-static const char *WIFI_PASSWORD = "your-wifi-password";
-```
-
-- UDP target: the IP address printed by the ESP32 at startup, port `2222`
-
-Commands are Message Frames with the ASCII prefix `JJA` followed by a one-letter command code. Multi-byte integer parameters are sent big-endian. A frame is complete as soon as the listed payload length has arrived; do not pad shorter commands to 20 bytes.
-
-| Command | Payload | Example | Description |
-| --- | --- | --- | --- |
-| `JJAH` | none | `JJAH` | Stops active movement without changing axis targets, motion limits, or emergency-stop state. |
-| `JJAT` | two signed 6-character decimal values, separated by any one byte | `JJAT+00900,-00450` | Sets target axis angles. Values are divided by `100`, so `+00900` means `9.00` degrees. |
-| `JJAM` | eight signed 16-bit integers | `4A 4A 41 4D 03 84 FE 3E 00 00 00 00 00 00 00 00 00 00 00 00` | Sets axis targets in binary form. This example sets axis 1 to `900` and axis 2 to `-450`; values are divided by `100` for axis targets. |
-| `JJAS` | five signed 16-bit integers | `4A 4A 41 53 00 32 00 00 00 64 00 00 00 00` | Sets motion limit percentages. This example sets speed to `50%` and acceleration to `100%`. |
-| `JJAC` | none | `JJAC` | Zeros the current position without discovering a physical reference. |
-| `JJAE` | none | `JJAE` | Emergency stop. Stops timers, disables the motor driver, turns off the status LED, and prevents future movement until reboot. |
-
-Example: move axis 1 to `9.00` degrees and axis 2 to `-4.50` degrees over UDP from PowerShell:
+Use PlatformIO with the `um_feathers2` environment:
 
 ```powershell
-$udp = [System.Net.Sockets.UdpClient]::new()
-$bytes = [System.Text.Encoding]::ASCII.GetBytes("JJAT+00900,-00450")
-$udp.Send($bytes, $bytes.Length, "<esp32-ip-address>", 2222)
-$udp.Close()
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run
 ```
 
-The same payload can also be sent over the USB serial connection.
+The firmware depends on these PlatformIO libraries from [platformio.ini](platformio.ini):
+
+- `gin66/FastAccelStepper`
+- `teemuatlut/TMCStepper`
+
+## Current Firmware Shape
+
+The current firmware is split into a small set of modules:
+
+| File | Responsibility |
+| --- | --- |
+| [src/main.cpp](src/main.cpp) | Physical configuration, module wiring, serial command dispatch, range test, and pattern test orchestration. |
+| [src/MotorAdapter.h](src/MotorAdapter.h) / [src/MotorAdapter.cpp](src/MotorAdapter.cpp) | Per-axis Motor adapter around FastAccelStepper and TMC2209 setup/runtime calls. |
+| [src/StallDetector.h](src/StallDetector.h) / [src/StallDetector.cpp](src/StallDetector.cpp) | Stall confirmation by sampling UART-read `SG_RESULT` against the configured StallGuard threshold. |
+| [src/HomingStateMachine.h](src/HomingStateMachine.h) / [src/HomingStateMachine.cpp](src/HomingStateMachine.cpp) | Homing Robot State transitions for X then Y, including arming, seeking, backoff, configured-range handling, and fault state. |
+
+`MotorAdapter` preserves the ADR-0001 FastAccelStepper decision by wrapping the library instead of replacing it. `Axis` now carries only axis metadata and range state; hardware driver pointers and pins live behind the Motor adapter.
+
+## Homing Behavior
+
+Homing is sensorless StallGuard homing using TMC2209 UART reads. The firmware does not use a DIAG pin for stall detection.
+
+For each axis, homing:
+
+1. Arms by moving away from the expected zero end.
+2. Seeks toward zero while `StallDetector` samples `SG_RESULT` after a settle distance.
+3. Accepts a stall when `SG_RESULT <= SGTHRS` for the configured confirmation count.
+4. Sets the zero position, backs off, and either uses the configured range or seeks the max end.
+5. Repeats the same process for the Y axis.
+
+Configured full-step ranges are set in [src/main.cpp](src/main.cpp):
+
+```cpp
+constexpr uint32_t X_AXIS_RANGE_FULLSTEP = 512;
+constexpr uint32_t Y_AXIS_RANGE_FULLSTEP = 704;
+```
+
+Set either value to `0` to make that axis run the full FindZero + FindMax range discovery path.
+
+## Serial Commands
+
+Connect over USB serial at `115200` baud. Commands are single characters:
+
+| Command | Description |
+| --- | --- |
+| `s` | Start homing X then Y. |
+| `c` | Run the axis range sweep test after both ranges are known. |
+| `1` | Run the square pattern test. |
+| `2` | Run the diamond pattern test. |
+| `3` | Run the figure-8 pattern test. |
+| `4` | Run the spiral pattern test. |
+| `d` | Print one StallGuard diagnostic sample. |
+| `p` | Print pattern command help. |
+| `x` | Abort active homing, range test, or pattern test. |
+
+Pattern tests require successful homing first so both axis ranges are known.
