@@ -1,6 +1,6 @@
 # laser-pointer-robot
 
-Firmware for a two-axis stepper-driven laser pointer robot on an Unexpected Maker FeatherS2. The active PlatformIO sketch is [src/main.cpp](src/main.cpp); the older Arduino sketch remains under [src/Laser_Pointer_Robot](src/Laser_Pointer_Robot) for now.
+ESP32 (also compatible boards are RPi Pico, RPi Pico 2, Arduino) firmware based on PlatformIO for a two-axis stepper-driven laser pointer robot.
 
 ## Build
 
