@@ -37,8 +37,16 @@ The delivery mechanism that carries commands to the robot.
 _Avoid_: Command
 
 **Command Input**:
-The responsibility that parses transport input, currently single-character USB serial input, into commands.
+The responsibility that parses transport input, currently single-character USB serial input, into catalog-backed Commands.
 _Avoid_: Network, robot motion
+
+**Command Catalog**:
+The responsibility that defines command groups, commands, parameters, transport aliases, Web names, and help text in one static table.
+_Avoid_: Transport parser, robot motion
+
+**Command Dispatcher**:
+The responsibility that consumes Commands and invokes Robot Motion modules without knowing which Transport produced the command.
+_Avoid_: Serial command parser, Web API handler
 
 **Robot Motion**:
 The responsibility that consumes commands and updates robot state, axis targets, motor positions, timers, and driver enablement.

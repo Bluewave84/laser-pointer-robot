@@ -2,6 +2,7 @@
 #include <FastAccelStepper.h>
 #include <TMCStepper.h>
 
+#include "CommandSystem.h"
 #include "HomingStateMachine.h"
 #include "MotorAdapter.h"
 #include "StallDetector.h"
@@ -69,6 +70,7 @@ MotorAdapter *activeMotor = &xMotor;
 
 StallDetector stallDetector(STALL_SAMPLE_INTERVAL_MS, STALL_CONFIRM_SAMPLES, SEEK_SETTLE_STEPS);
 
+bool configurationIsComplete();
 void printDriverSample();
 
 const HomingStateMachineConfig homingConfig = {
@@ -103,6 +105,16 @@ HomingStateMachine homing(
     yMotor,
     stallDetector,
     testController,
+    printDriverSample);
+
+CommandCatalog commandCatalog;
+SerialCommandInput serialCommandInput(Serial, commandCatalog);
+CommandDispatcher commandDispatcher(
+    homing,
+    testController,
+    commandCatalog,
+    Serial,
+    configurationIsComplete,
     printDriverSample);
 
 bool configurationIsComplete()
@@ -154,92 +166,18 @@ void setup()
     }
 
     disableAxis();
-    Serial.println(F("Ready. Send 's' to home, 'c' for range test, '1'-'4' for patterns, 'x' to abort, or 'd' for StallGuard diagnostics."));
-    testController.printPatternHelp();
+    Serial.println(F("Ready. Send 'p' for the command catalog."));
+    commandCatalog.printTo(Serial);
 }
 
 void loop()
 {
     while (Serial.available() > 0)
     {
-        const char command = static_cast<char>(Serial.read());
-        if (command == 's' || command == 'S')
+        Command command = {};
+        if (serialCommandInput.read(command))
         {
-            homing.begin(configurationIsComplete());
-        }
-        else if (command == 'x' || command == 'X')
-        {
-            if (testController.isActive())
-            {
-                testController.cancel(F("serial abort"));
-            }
-            else
-            {
-                homing.abort(F("serial abort"));
-            }
-        }
-        else if (command == 'd' || command == 'D')
-        {
-            printDriverSample();
-        }
-        else if (command == 'c' || command == 'C')
-        {
-            if (!homing.isIdle())
-            {
-                Serial.println(F("Range test refused: homing is active or faulted."));
-            }
-            else
-            {
-                testController.beginRangeTest();
-            }
-        }
-        else if (command == '1')
-        {
-            if (!homing.isIdle())
-            {
-                Serial.println(F("Pattern refused: homing is active or faulted."));
-            }
-            else
-            {
-                testController.beginPatternTest(PatternKind::Square);
-            }
-        }
-        else if (command == '2')
-        {
-            if (!homing.isIdle())
-            {
-                Serial.println(F("Pattern refused: homing is active or faulted."));
-            }
-            else
-            {
-                testController.beginPatternTest(PatternKind::Diamond);
-            }
-        }
-        else if (command == '3')
-        {
-            if (!homing.isIdle())
-            {
-                Serial.println(F("Pattern refused: homing is active or faulted."));
-            }
-            else
-            {
-                testController.beginPatternTest(PatternKind::Figure8);
-            }
-        }
-        else if (command == '4')
-        {
-            if (!homing.isIdle())
-            {
-                Serial.println(F("Pattern refused: homing is active or faulted."));
-            }
-            else
-            {
-                testController.beginPatternTest(PatternKind::Spiral);
-            }
-        }
-        else if (command == 'p' || command == 'P')
-        {
-            testController.printPatternHelp();
+            commandDispatcher.dispatch(command);
         }
     }
 

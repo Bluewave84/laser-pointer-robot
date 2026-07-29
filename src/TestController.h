@@ -42,7 +42,6 @@ public:
     void beginPatternTest(PatternKind pattern);
     void cancel(const __FlashStringHelper *reason);
     void update();
-    void printPatternHelp() const;
 
 private:
     struct PatternWaypoint

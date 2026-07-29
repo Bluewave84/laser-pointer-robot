@@ -112,17 +112,6 @@ void TestController::update()
     updatePatternTest();
 }
 
-void TestController::printPatternHelp() const
-{
-    Serial.println(F("Pattern commands:"));
-    Serial.println(F("  c = axis range sweep (existing test)"));
-    Serial.println(F("  1 = square"));
-    Serial.println(F("  2 = diamond"));
-    Serial.println(F("  3 = figure-8"));
-    Serial.println(F("  4 = spiral"));
-    Serial.println(F("  x = abort active homing/range/pattern"));
-}
-
 bool TestController::allAxisRangesKnown() const
 {
     return axisRangeIsKnown(xMotor.axisState()) && axisRangeIsKnown(yMotor.axisState());

@@ -21,7 +21,8 @@ The current firmware is split into a small set of modules:
 
 | File | Responsibility |
 | --- | --- |
-| [src/main.cpp](src/main.cpp) | Physical configuration, module wiring, and serial command dispatch. |
+| [src/main.cpp](src/main.cpp) | Physical configuration, module wiring, and firmware setup/loop coordination. |
+| [src/CommandSystem.h](src/CommandSystem.h) / [src/CommandSystem.cpp](src/CommandSystem.cpp) | Catalog-backed Command Input and dispatch: command groups, commands, parameters, Serial aliases, Web names, help text, and Robot Motion routing. |
 | [src/MotorAdapter.h](src/MotorAdapter.h) / [src/MotorAdapter.cpp](src/MotorAdapter.cpp) | Per-axis Motor adapter around FastAccelStepper and TMC2209 setup/runtime calls. |
 | [src/StallDetector.h](src/StallDetector.h) / [src/StallDetector.cpp](src/StallDetector.cpp) | Stall confirmation by sampling UART-read `SG_RESULT` against the configured StallGuard threshold. |
 | [src/HomingStateMachine.h](src/HomingStateMachine.h) / [src/HomingStateMachine.cpp](src/HomingStateMachine.cpp) | Homing Robot State transitions for X then Y, including arming, seeking, backoff, configured-range handling, and fault state. |
@@ -50,20 +51,22 @@ constexpr uint32_t Y_AXIS_RANGE_FULLSTEP = 704;
 
 Set either value to `0` to make that axis run the full FindZero + FindMax range discovery path.
 
-## Serial Commands
+## Commands
 
-Connect over USB serial at `115200` baud. Commands are single characters:
+Commands are defined as command groups, commands, and optional parameters in the static command catalog. USB serial is the active Transport today; Web names are included in the catalog so a future Web API can produce the same Commands without reimplementing Robot Motion dispatch.
 
-| Command | Description |
-| --- | --- |
-| `s` | Start homing X then Y. |
-| `c` | Run the axis range sweep test after both ranges are known. |
-| `1` | Run the square pattern test. |
-| `2` | Run the diamond pattern test. |
-| `3` | Run the figure-8 pattern test. |
-| `4` | Run the spiral pattern test. |
-| `d` | Print one StallGuard diagnostic sample. |
-| `p` | Print pattern command help. |
-| `x` | Abort active homing, range test, or pattern test. |
+Connect over USB serial at `115200` baud. Serial aliases are single characters:
+
+| Group | Command | Parameter | Serial | Web name | Description |
+| --- | --- | --- | --- | --- | --- |
+| Homing | StartHoming | none | `s` | `homing.start` | Start homing X then Y. |
+| RobotMotion | AbortActive | none | `x` | `motion.abort` | Abort active homing, range test, or pattern test. |
+| StallDetection | PrintStallGuardSample | none | `d` | `stall.sample` | Print one StallGuard diagnostic sample. |
+| TestController | StartRangeTest | none | `c` | `test.range` | Run the axis range sweep test after both ranges are known. |
+| TestController | StartPatternTest | `Pattern=Square` | `1` | `test.pattern.square` | Run the square pattern test. |
+| TestController | StartPatternTest | `Pattern=Diamond` | `2` | `test.pattern.diamond` | Run the diamond pattern test. |
+| TestController | StartPatternTest | `Pattern=Figure8` | `3` | `test.pattern.figure8` | Run the figure-8 pattern test. |
+| TestController | StartPatternTest | `Pattern=Spiral` | `4` | `test.pattern.spiral` | Run the spiral pattern test. |
+| Catalog | PrintCommandCatalog | none | `p` | `catalog.print` | Print the command catalog. |
 
 Pattern tests require successful homing first so both axis ranges are known.
