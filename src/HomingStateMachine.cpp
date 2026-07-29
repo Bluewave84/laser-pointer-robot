@@ -124,15 +124,9 @@ void HomingStateMachine::startSeekingCurrentPhase()
 
 void HomingStateMachine::begin(bool configurationComplete)
 {
-    if (rangeTestActive)
+    if (testController.isActive())
     {
-        Serial.println(F("Homing refused: range test is active."));
-        return;
-    }
-
-    if (patternTestActive)
-    {
-        Serial.println(F("Homing refused: a pattern test is active."));
+        Serial.println(F("Homing refused: a test is active."));
         return;
     }
 
@@ -188,33 +182,6 @@ void HomingStateMachine::begin(bool configurationComplete)
 
 void HomingStateMachine::abort(const __FlashStringHelper *reason)
 {
-    if (patternTestActive)
-    {
-        if (xMotor.isRunning())
-        {
-            xMotor.forceStop();
-        }
-        if (yMotor.isRunning())
-        {
-            yMotor.forceStop();
-        }
-        stopPatternTest(reason);
-        return;
-    }
-
-    if (rangeTestActive)
-    {
-        activeMotor->forceStop();
-        rangeTestActive = false;
-        rangeTestMotor = nullptr;
-        activeMotor->setProfile(config.defaultSpeedHz, config.defaultAcceleration);
-        activeMotor = &xMotor;
-        activeMotor->disableOutputs();
-        Serial.print(F("Range test aborted: "));
-        Serial.println(reason);
-        return;
-    }
-
     fail(reason);
 }
 

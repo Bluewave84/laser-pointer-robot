@@ -44,6 +44,10 @@ _Avoid_: Network, robot motion
 The responsibility that consumes commands and updates robot state, axis targets, motor positions, timers, and driver enablement.
 _Avoid_: Command input, robot configuration
 
+**Test Controller**:
+The Robot Motion responsibility that owns range-test and pattern-test orchestration, including test state, waypoints, motion profiles, update steps, and cancellation.
+_Avoid_: Homing state, command input
+
 **Homing**:
 The Robot Motion responsibility that discovers a physical reference and usable axis range by moving an axis until StallGuard reports a stall.
 _Avoid_: Zero current position, range test

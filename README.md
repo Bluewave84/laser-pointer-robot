@@ -21,10 +21,11 @@ The current firmware is split into a small set of modules:
 
 | File | Responsibility |
 | --- | --- |
-| [src/main.cpp](src/main.cpp) | Physical configuration, module wiring, serial command dispatch, range test, and pattern test orchestration. |
+| [src/main.cpp](src/main.cpp) | Physical configuration, module wiring, and serial command dispatch. |
 | [src/MotorAdapter.h](src/MotorAdapter.h) / [src/MotorAdapter.cpp](src/MotorAdapter.cpp) | Per-axis Motor adapter around FastAccelStepper and TMC2209 setup/runtime calls. |
 | [src/StallDetector.h](src/StallDetector.h) / [src/StallDetector.cpp](src/StallDetector.cpp) | Stall confirmation by sampling UART-read `SG_RESULT` against the configured StallGuard threshold. |
 | [src/HomingStateMachine.h](src/HomingStateMachine.h) / [src/HomingStateMachine.cpp](src/HomingStateMachine.cpp) | Homing Robot State transitions for X then Y, including arming, seeking, backoff, configured-range handling, and fault state. |
+| [src/TestController.h](src/TestController.h) / [src/TestController.cpp](src/TestController.cpp) | Range-test and pattern-test orchestration, including test state, waypoints, motion profiles, updates, and cancellation. |
 
 `MotorAdapter` preserves the ADR-0001 FastAccelStepper decision by wrapping the library instead of replacing it. `Axis` now carries only axis metadata and range state; hardware driver pointers and pins live behind the Motor adapter.
 
