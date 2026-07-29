@@ -3,7 +3,11 @@
 #include <Arduino.h>
 
 #include "HomingStateMachine.h"
+#include "MotorAdapter.h"
 #include "TestController.h"
+
+constexpr uint16_t COMMAND_POSITION_SCALE = 10000;
+constexpr uint8_t SERIAL_COMMAND_BUFFER_LENGTH = 32;
 
 enum class CommandGroup : uint8_t
 {
@@ -18,6 +22,7 @@ enum class CommandId : uint8_t
 {
     StartHoming,
     AbortActive,
+    MoveToPosition,
     PrintStallGuardSample,
     StartRangeTest,
     StartPatternTest,
@@ -28,6 +33,7 @@ enum class CommandParameterId : uint8_t
 {
     None,
     Pattern,
+    NormalizedPosition,
 };
 
 enum class CommandPattern : uint8_t
@@ -42,6 +48,8 @@ struct CommandParameter
 {
     CommandParameterId id;
     uint8_t value;
+    uint16_t xPosition;
+    uint16_t yPosition;
 };
 
 struct Command
@@ -50,6 +58,8 @@ struct Command
     CommandId id;
     CommandParameter parameter;
 };
+
+Command moveToPositionCommand(uint16_t xPosition, uint16_t yPosition);
 
 enum class CommandStatus : uint8_t
 {
@@ -101,6 +111,11 @@ public:
 private:
     Stream &serial;
     const CommandCatalog &catalog;
+    char lineBuffer[SERIAL_COMMAND_BUFFER_LENGTH] = {};
+    uint8_t lineLength = 0;
+
+    bool parseLineCommand(Command &command);
+    void resetLine();
 };
 
 using ConfigurationIsCompleteCallback = bool (*)();
@@ -112,12 +127,16 @@ public:
     CommandDispatcher(
         HomingStateMachine &homing,
         TestController &testController,
+        MotorAdapter &xMotor,
+        MotorAdapter &yMotor,
         const CommandCatalog &catalog,
         Print &output,
         ConfigurationIsCompleteCallback configurationIsComplete,
         PrintDriverSampleCommandCallback printDriverSample)
         : homing(homing),
           testController(testController),
+          xMotor(xMotor),
+          yMotor(yMotor),
           catalog(catalog),
           output(output),
           configurationIsComplete(configurationIsComplete),
@@ -130,11 +149,15 @@ public:
 private:
     HomingStateMachine &homing;
     TestController &testController;
+    MotorAdapter &xMotor;
+    MotorAdapter &yMotor;
     const CommandCatalog &catalog;
     Print &output;
     ConfigurationIsCompleteCallback configurationIsComplete;
     PrintDriverSampleCommandCallback printDriverSample;
 
+    CommandResult moveToPosition(const CommandParameter &parameter);
+    int32_t positionFromNormalized(const Axis &axis, uint16_t normalizedPosition) const;
     CommandResult startPatternTest(const CommandParameter &parameter);
     PatternKind toPatternKind(CommandPattern pattern) const;
 };

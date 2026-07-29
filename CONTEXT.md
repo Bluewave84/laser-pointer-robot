@@ -13,8 +13,12 @@ A user-facing aiming dimension measured in degrees.
 _Avoid_: Channel, motor, stepper
 
 **Axis Target**:
-A requested axis angle that the robot should move toward.
-_Avoid_: Channel value, motor step position
+A requested axis position that the robot should move toward, expressed either as a user-facing angle or as a normalized range position.
+_Avoid_: Channel value, raw microstep position
+
+**Normalized Axis Position**:
+A transport-safe axis target from `0` to `10000`, where `0` is the known minimum usable position and `10000` is the known maximum usable position after homing.
+_Avoid_: Microstep count, full-step count
 
 **Motor**:
 A stepper actuator that moves an axis and is measured by step position.
@@ -25,7 +29,7 @@ The responsibility that hides per-axis motor driver and stepper-library details 
 _Avoid_: Axis, robot state
 
 **Command**:
-A domain intent sent to the laser pointer robot, such as homing, running a range test, running a pattern test, printing diagnostics, or aborting active motion.
+A domain intent sent to the laser pointer robot, such as homing, moving to an axis target, running a range test, running a pattern test, printing diagnostics, or aborting active motion.
 _Avoid_: Serial character, message frame, transport input
 
 **Robot State**:

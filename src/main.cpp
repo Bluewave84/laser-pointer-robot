@@ -37,7 +37,7 @@ constexpr uint8_t STALLGUARD_SGTHRS = 45;
 constexpr uint32_t X_AXIS_RANGE_FULLSTEP = 512;
 constexpr uint32_t Y_AXIS_RANGE_FULLSTEP = 704;
 
-constexpr uint16_t MICROSTEPS = 8;
+constexpr uint16_t MICROSTEPS = 32;
 constexpr uint32_t HOMING_SPEED_HZ = 800;
 constexpr uint32_t HOMING_ACCELERATION = 1600;
 constexpr int32_t ARMING_STEPS = 200;
@@ -112,6 +112,8 @@ SerialCommandInput serialCommandInput(Serial, commandCatalog);
 CommandDispatcher commandDispatcher(
     homing,
     testController,
+    xMotor,
+    yMotor,
     commandCatalog,
     Serial,
     configurationIsComplete,
