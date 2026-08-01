@@ -13,8 +13,12 @@ A user-facing aiming dimension measured in degrees.
 _Avoid_: Channel, motor, stepper
 
 **Axis Target**:
-A requested axis angle that the robot should move toward.
-_Avoid_: Channel value, motor step position
+A requested axis position that the robot should move toward, expressed either as a user-facing angle or as a normalized range position.
+_Avoid_: Channel value, raw microstep position
+
+**Normalized Axis Position**:
+A transport-safe axis target from `0` to `10000`, where `0` is the known minimum usable position and `10000` is the known maximum usable position after homing.
+_Avoid_: Microstep count, full-step count
 
 **Motor**:
 A stepper actuator that moves an axis and is measured by step position.
@@ -25,7 +29,7 @@ The responsibility that hides per-axis motor driver and stepper-library details 
 _Avoid_: Axis, robot state
 
 **Command**:
-A domain intent sent to the laser pointer robot, such as homing, running a range test, running a pattern test, printing diagnostics, or aborting active motion.
+A domain intent sent to the laser pointer robot, such as homing, moving to an axis target, running a range test, running a pattern test, printing diagnostics, or aborting active motion.
 _Avoid_: Serial character, message frame, transport input
 
 **Robot State**:
@@ -37,12 +41,24 @@ The delivery mechanism that carries commands to the robot.
 _Avoid_: Command
 
 **Command Input**:
-The responsibility that parses transport input, currently single-character USB serial input, into commands.
+The responsibility that parses transport input, currently single-character USB serial input, into catalog-backed Commands.
 _Avoid_: Network, robot motion
+
+**Command Catalog**:
+The responsibility that defines command groups, commands, parameters, transport aliases, Web names, and help text in one static table.
+_Avoid_: Transport parser, robot motion
+
+**Command Dispatcher**:
+The responsibility that consumes Commands and invokes Robot Motion modules without knowing which Transport produced the command.
+_Avoid_: Serial command parser, Web API handler
 
 **Robot Motion**:
 The responsibility that consumes commands and updates robot state, axis targets, motor positions, timers, and driver enablement.
 _Avoid_: Command input, robot configuration
+
+**Test Controller**:
+The Robot Motion responsibility that owns range-test and pattern-test orchestration, including test state, waypoints, motion profiles, update steps, and cancellation.
+_Avoid_: Homing state, command input
 
 **Homing**:
 The Robot Motion responsibility that discovers a physical reference and usable axis range by moving an axis until StallGuard reports a stall.

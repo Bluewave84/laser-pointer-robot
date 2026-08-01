@@ -4,6 +4,7 @@
 
 #include "MotorAdapter.h"
 #include "StallDetector.h"
+#include "TestController.h"
 
 enum class HomingState
 {
@@ -35,7 +36,6 @@ struct HomingStateMachineConfig
 };
 
 using PrintDriverSampleCallback = void (*)();
-using StopPatternTestCallback = void (*)(const __FlashStringHelper *reason);
 
 class HomingStateMachine
 {
@@ -46,21 +46,15 @@ public:
         MotorAdapter &xMotor,
         MotorAdapter &yMotor,
         StallDetector &stallDetector,
-        bool &rangeTestActive,
-        MotorAdapter *&rangeTestMotor,
-        bool &patternTestActive,
-        PrintDriverSampleCallback printDriverSample,
-        StopPatternTestCallback stopPatternTest)
+        TestController &testController,
+        PrintDriverSampleCallback printDriverSample)
         : config(config),
           activeMotor(activeMotor),
           xMotor(xMotor),
           yMotor(yMotor),
           stallDetector(stallDetector),
-          rangeTestActive(rangeTestActive),
-          rangeTestMotor(rangeTestMotor),
-          patternTestActive(patternTestActive),
-          printDriverSample(printDriverSample),
-          stopPatternTest(stopPatternTest)
+          testController(testController),
+          printDriverSample(printDriverSample)
     {
     }
 
@@ -86,11 +80,8 @@ private:
     MotorAdapter &xMotor;
     MotorAdapter &yMotor;
     StallDetector &stallDetector;
-    bool &rangeTestActive;
-    MotorAdapter *&rangeTestMotor;
-    bool &patternTestActive;
+    TestController &testController;
     PrintDriverSampleCallback printDriverSample;
-    StopPatternTestCallback stopPatternTest;
     HomingState state = HomingState::Idle;
     HomingPhase phase = HomingPhase::FindZero;
     uint32_t lastDiagnosticMs = 0;
