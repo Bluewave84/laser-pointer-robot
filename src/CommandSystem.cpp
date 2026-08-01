@@ -1,5 +1,7 @@
 #include "CommandSystem.h"
 
+#include "HomingStateMachine.h"
+
 #include <stdlib.h>
 #include <string.h>
 

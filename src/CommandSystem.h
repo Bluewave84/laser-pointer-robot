@@ -2,9 +2,10 @@
 
 #include <Arduino.h>
 
-#include "HomingStateMachine.h"
 #include "MotorAdapter.h"
 #include "TestController.h"
+
+class HomingStateMachine;
 
 constexpr uint16_t COMMAND_POSITION_SCALE = 10000;
 constexpr uint8_t SERIAL_COMMAND_BUFFER_LENGTH = 32;

@@ -2,8 +2,8 @@
 #include <FastAccelStepper.h>
 #include <TMCStepper.h>
 
-#include "CommandSystem.h"
 #include "HomingStateMachine.h"
+#include "CommandSystem.h"
 #include "MotorAdapter.h"
 #include "StallDetector.h"
 #include "TestController.h"
