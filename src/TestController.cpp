@@ -185,6 +185,15 @@ void TestController::stopPatternTest(const __FlashStringHelper *reason)
         return;
     }
 
+    if (xMotor.isRunning())
+    {
+        xMotor.forceStop();
+    }
+    if (yMotor.isRunning())
+    {
+        yMotor.forceStop();
+    }
+
     patternTestActive = false;
     patternDwellActive = false;
     restoreDefaultMotionProfile();
