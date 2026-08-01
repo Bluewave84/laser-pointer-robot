@@ -28,16 +28,11 @@ _Avoid_: Axis, channel
 The responsibility that hides per-axis motor driver and stepper-library details behind movement, position, profile, enablement, and StallGuard sampling operations.
 _Avoid_: Axis, robot state
 
-**Motor Adapter**:
-The responsibility that hides per-axis motor driver and stepper-library details behind movement, position, profile, enablement, and StallGuard sampling operations.
-_Avoid_: Axis, robot state
-
 **Command**:
 A domain intent sent to the laser pointer robot, such as homing, moving to an axis target, running a range test, running a pattern test, printing diagnostics, or aborting active motion.
 _Avoid_: Serial character, message frame, transport input
 
 **Robot State**:
-The durable operating truth of the robot after commands are consumed, including active homing phase, known axis ranges, test activity, fault state, and current motor position.
 The durable operating truth of the robot after commands are consumed, including active homing phase, known axis ranges, test activity, fault state, and current motor position.
 _Avoid_: Current command, mode
 

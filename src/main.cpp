@@ -37,6 +37,8 @@ constexpr uint8_t STALLGUARD_SGTHRS = 45;
 constexpr uint32_t X_AXIS_RANGE_FULLSTEP = 512;
 constexpr uint32_t Y_AXIS_RANGE_FULLSTEP = 704;
 
+// 32 microsteps per full step. Changing this scales all axis ranges (X/Y_AXIS_RANGE_FULLSTEP * MICROSTEPS)
+// and affects all motion scaling and homing behavior; update X/Y_AXIS_RANGE_FULLSTEP if the hardware uses a different value.
 constexpr uint16_t MICROSTEPS = 32;
 constexpr uint32_t HOMING_SPEED_HZ = 800;
 constexpr uint32_t HOMING_ACCELERATION = 1600;
