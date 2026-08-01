@@ -3,6 +3,7 @@
 #include <TMCStepper.h>
 
 #include "HomingStateMachine.h"
+#include "BoardConfiguration.h"
 #include "CommandSystem.h"
 #include "MotorAdapter.h"
 #include "StallDetector.h"
@@ -16,15 +17,6 @@ constexpr uint32_t CONSOLE_BAUD = 115200;
 constexpr uint32_t TMC_UART_BAUD = 115200;
 constexpr uint8_t X_TMC_ADDRESS = 0;
 constexpr uint8_t Y_TMC_ADDRESS = 1;
-
-// Verified UM FeatherS2 wiring.
-constexpr int TMC_RX_PIN = 44;
-constexpr int TMC_TX_PIN = 43;
-constexpr uint8_t X_STEP_PIN = 17;
-constexpr uint8_t X_DIR_PIN = 18;
-constexpr uint8_t Y_STEP_PIN = 5;
-constexpr uint8_t Y_DIR_PIN = 6;
-constexpr uint8_t ENN_PIN = 12;
 
 // Set these four values from the carrier-board schematic, motor datasheet, and
 // a no-load StallGuard calibration. Zero keeps the sketch in a safe idle state.
@@ -66,8 +58,8 @@ FastAccelStepper *yStepper = NULL;
 
 Axis xAxis = {"X", 0, 0};
 Axis yAxis = {"Y", 0, 0};
-MotorAdapter xMotor(xAxis, xDriver, xStepper, X_STEP_PIN, X_DIR_PIN);
-MotorAdapter yMotor(yAxis, yDriver, yStepper, Y_STEP_PIN, Y_DIR_PIN);
+MotorAdapter xMotor(xAxis, xDriver, xStepper, BOARD_CONFIGURATION.xStepPin, BOARD_CONFIGURATION.xDirPin);
+MotorAdapter yMotor(yAxis, yDriver, yStepper, BOARD_CONFIGURATION.yStepPin, BOARD_CONFIGURATION.yDirPin);
 MotorAdapter *activeMotor = &xMotor;
 
 StallDetector stallDetector(STALL_SAMPLE_INTERVAL_MS, STALL_CONFIRM_SAMPLES, SEEK_SETTLE_STEPS);
@@ -145,7 +137,7 @@ void disableAxis()
 
 bool setupDrivers()
 {
-    tmcSerial.begin(TMC_UART_BAUD, SERIAL_8N1, TMC_RX_PIN, TMC_TX_PIN);
+    tmcSerial.begin(TMC_UART_BAUD, SERIAL_8N1, BOARD_CONFIGURATION.tmcRxPin, BOARD_CONFIGURATION.tmcTxPin);
     const bool configurationComplete = configurationIsComplete();
     return xMotor.configureDriver(MOTOR_RMS_CURRENT_MA, MICROSTEPS, STALLGUARD_TCOOLTHRS, STALLGUARD_SGTHRS, configurationComplete) &&
            yMotor.configureDriver(MOTOR_RMS_CURRENT_MA, MICROSTEPS, STALLGUARD_TCOOLTHRS, STALLGUARD_SGTHRS, configurationComplete);
@@ -153,9 +145,9 @@ bool setupDrivers()
 
 bool setupMotion()
 {
-    engine.init();
-    return xMotor.setupMotion(engine, ENN_PIN, HOMING_SPEED_HZ, HOMING_ACCELERATION) &&
-           yMotor.setupMotion(engine, ENN_PIN, HOMING_SPEED_HZ, HOMING_ACCELERATION);
+    engine.init(BOARD_CONFIGURATION.fastAccelStepperCore);
+    return xMotor.setupMotion(engine, BOARD_CONFIGURATION.enablePin, HOMING_SPEED_HZ, HOMING_ACCELERATION) &&
+           yMotor.setupMotion(engine, BOARD_CONFIGURATION.enablePin, HOMING_SPEED_HZ, HOMING_ACCELERATION);
 }
 
 void setup()
@@ -170,6 +162,8 @@ void setup()
     }
 
     disableAxis();
+    Serial.print(F("Board: "));
+    Serial.println(BOARD_CONFIGURATION.name);
     Serial.println(F("Ready. Send 'p' for the command catalog."));
     commandCatalog.printTo(Serial);
 }

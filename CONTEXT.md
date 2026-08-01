@@ -72,6 +72,10 @@ _Avoid_: DIAG pin interrupt, homing state
 The responsibility that provides physical configuration and default motion limits.
 _Avoid_: Runtime state, command input
 
+**Board Configuration**:
+The compile-time physical configuration for a supported controller board, including pin mapping and stepper task CPU affinity.
+_Avoid_: Runtime state, command input
+
 **Physical Configuration**:
 The fixed hardware facts of a laser pointer robot build, such as pins, motor geometry, axis limits, and initial position.
 _Avoid_: Motion limits, command settings

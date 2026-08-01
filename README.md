@@ -1,13 +1,19 @@
 # laser-pointer-robot
 
-Firmware for a two-axis stepper-driven laser pointer robot on an Unexpected Maker FeatherS2. The active PlatformIO sketch is [src/main.cpp](src/main.cpp); the older Arduino sketch remains under [src/Laser_Pointer_Robot](src/Laser_Pointer_Robot) for now.
+Firmware for a two-axis stepper-driven laser pointer robot on Feather-format ESP32 boards. The active PlatformIO sketch is [src/main.cpp](src/main.cpp); the older Arduino sketch remains under [src/Laser_Pointer_Robot](src/Laser_Pointer_Robot) for now.
+
+Supported PlatformIO targets:
+
+- `um_feathers2`: Unexpected Maker FeatherS2.
+- `adafruit_feather_esp32_v2`: Adafruit ESP32 Feather V2. Pin capabilities and the firmware pin map are documented in [docs/hardware/adafruit-esp32-feather-v2.md](docs/hardware/adafruit-esp32-feather-v2.md).
 
 ## Build
 
-Use PlatformIO with the `um_feathers2` environment:
+Use PlatformIO with the target board environment:
 
 ```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run --environment um_feathers2
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run --environment adafruit_feather_esp32_v2
 ```
 
 The firmware depends on these PlatformIO libraries from [platformio.ini](platformio.ini):
@@ -22,13 +28,14 @@ The current firmware is split into a small set of modules:
 | File | Responsibility |
 | --- | --- |
 | [src/main.cpp](src/main.cpp) | Physical configuration, module wiring, and firmware setup/loop coordination. |
+| [src/BoardConfiguration.h](src/BoardConfiguration.h) | Compile-time board selection for pin maps and FastAccelStepper CPU affinity. |
 | [src/CommandSystem.h](src/CommandSystem.h) / [src/CommandSystem.cpp](src/CommandSystem.cpp) | Catalog-backed Command Input and dispatch: command groups, commands, parameters, Serial aliases, Web names, help text, and Robot Motion routing. |
 | [src/MotorAdapter.h](src/MotorAdapter.h) / [src/MotorAdapter.cpp](src/MotorAdapter.cpp) | Per-axis Motor adapter around FastAccelStepper and TMC2209 setup/runtime calls. |
 | [src/StallDetector.h](src/StallDetector.h) / [src/StallDetector.cpp](src/StallDetector.cpp) | Stall confirmation by sampling UART-read `SG_RESULT` against the configured StallGuard threshold. |
 | [src/HomingStateMachine.h](src/HomingStateMachine.h) / [src/HomingStateMachine.cpp](src/HomingStateMachine.cpp) | Homing Robot State transitions for X then Y, including arming, seeking, backoff, configured-range handling, and fault state. |
 | [src/TestController.h](src/TestController.h) / [src/TestController.cpp](src/TestController.cpp) | Range-test and pattern-test orchestration, including test state, waypoints, motion profiles, updates, and cancellation. |
 
-`MotorAdapter` preserves the ADR-0001 FastAccelStepper decision by wrapping the library instead of replacing it. `Axis` now carries only axis metadata and range state; hardware driver pointers and pins live behind the Motor adapter.
+`BoardConfiguration` selects the board-specific pins through PlatformIO `build_flags`. For the Adafruit ESP32 Feather V2 target, FastAccelStepper is initialized on CPU core `0`, keeping its stepping task off the Arduino loop core on the dual-core ESP32. `MotorAdapter` preserves the ADR-0001 FastAccelStepper decision by wrapping the library instead of replacing it. `Axis` now carries only axis metadata and range state; hardware driver pointers and pins live behind the Motor adapter.
 
 ## Homing Behavior
 
