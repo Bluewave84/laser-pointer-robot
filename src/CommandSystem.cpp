@@ -235,13 +235,32 @@ CommandResult CommandDispatcher::dispatch(const Command &command)
         printDriverSample();
         return {CommandStatus::Accepted, F("StallGuard sample printed.")};
     case CommandId::StartRangeTest:
+        if (testController.isActive())
+        {
+            output.println(F("Range test refused: a test is active."));
+            return {CommandStatus::Busy, F("A test is active.")};
+        }
         if (!homing.isIdle())
         {
             output.println(F("Range test refused: homing is active or faulted."));
             return {CommandStatus::Busy, F("Homing is active or faulted.")};
         }
+        if (!xMotor.isInitialized() || !yMotor.isInitialized())
+        {
+            output.println(F("Range test refused: steppers are not initialized."));
+            return {CommandStatus::Rejected, F("Steppers are not initialized.")};
+        }
+        if (xMotor.axisState().axisRangeSteps <= 0 || yMotor.axisState().axisRangeSteps <= 0)
+        {
+            output.println(F("Range test refused: run homing first so both axis ranges are known."));
+            return {CommandStatus::Rejected, F("Axis ranges are unknown.")};
+        }
         testController.beginRangeTest();
-        return {CommandStatus::Accepted, F("Range test command processed.")};
+        if (!testController.isActive())
+        {
+            return {CommandStatus::Rejected, F("Range test was refused.")};
+        }
+        return {CommandStatus::Accepted, F("Range test started.")};
     case CommandId::StartPatternTest:
         return startPatternTest(command.parameter);
     case CommandId::PrintCommandCatalog:
