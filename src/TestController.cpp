@@ -98,7 +98,7 @@ void TestController::cancel(const __FlashStringHelper *reason)
         activeMotor->forceStop();
         rangeTestActive = false;
         rangeTestMotor = nullptr;
-        activeMotor->setProfile(config.homingSpeedHz, config.homingAcceleration);
+        activeMotor->setProfile(runtimeMotionSettings.speedHz, runtimeMotionSettings.acceleration);
         activeMotor->disableOutputs();
         activeMotor = &xMotor;
         Serial.print(F("Range test aborted: "));
@@ -156,8 +156,8 @@ bool TestController::configurePatternMotionProfile()
         return false;
     }
 
-    if (!xMotor.setProfile(config.patternTestSpeedHz, config.patternTestAcceleration) ||
-        !yMotor.setProfile(config.patternTestSpeedHz, config.patternTestAcceleration))
+    if (!xMotor.setProfile(runtimeMotionSettings.speedHz, runtimeMotionSettings.acceleration) ||
+        !yMotor.setProfile(runtimeMotionSettings.speedHz, runtimeMotionSettings.acceleration))
     {
         Serial.println(F("Pattern refused: invalid pattern speed or acceleration."));
         return false;
@@ -168,8 +168,8 @@ bool TestController::configurePatternMotionProfile()
 
 void TestController::restoreDefaultMotionProfile()
 {
-    xMotor.setProfile(config.homingSpeedHz, config.homingAcceleration);
-    yMotor.setProfile(config.homingSpeedHz, config.homingAcceleration);
+    xMotor.setProfile(runtimeMotionSettings.speedHz, runtimeMotionSettings.acceleration);
+    yMotor.setProfile(runtimeMotionSettings.speedHz, runtimeMotionSettings.acceleration);
 }
 
 void TestController::disableAllAxes()
@@ -270,7 +270,7 @@ bool TestController::startRangeTestForMotor(MotorAdapter &motor)
 
 void TestController::finishRangeTest()
 {
-    activeMotor->setProfile(config.homingSpeedHz, config.homingAcceleration);
+    activeMotor->setProfile(runtimeMotionSettings.speedHz, runtimeMotionSettings.acceleration);
     activeMotor->disableOutputs();
     Serial.print(F("Range test axis "));
     Serial.print(activeMotor->axisName());

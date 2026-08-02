@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "MotorAdapter.h"
+#include "MotionSettings.h"
 #include "StallDetector.h"
 #include "TestController.h"
 
@@ -33,6 +34,7 @@ struct HomingStateMachineConfig
     int32_t yConfiguredAxisRangeSteps;
     uint32_t defaultSpeedHz;
     uint32_t defaultAcceleration;
+    uint16_t homingMicrosteps;
 };
 
 using PrintDriverSampleCallback = void (*)();
@@ -47,6 +49,7 @@ public:
         MotorAdapter &yMotor,
         StallDetector &stallDetector,
         TestController &testController,
+        RuntimeMotionSettings &runtimeMotionSettings,
         PrintDriverSampleCallback printDriverSample)
         : config(config),
           activeMotor(activeMotor),
@@ -54,6 +57,7 @@ public:
           yMotor(yMotor),
           stallDetector(stallDetector),
           testController(testController),
+          runtimeMotionSettings(runtimeMotionSettings),
           printDriverSample(printDriverSample)
     {
     }
@@ -81,6 +85,7 @@ private:
     MotorAdapter &yMotor;
     StallDetector &stallDetector;
     TestController &testController;
+    RuntimeMotionSettings &runtimeMotionSettings;
     PrintDriverSampleCallback printDriverSample;
     HomingState state = HomingState::Idle;
     HomingPhase phase = HomingPhase::FindZero;
@@ -94,4 +99,6 @@ private:
     int32_t seekStepsForCurrentPhase() const;
     int32_t backoffStepsForCurrentPhase() const;
     int32_t configuredAxisRangeSteps(const Axis &axis) const;
+    void restoreRuntimeMotionSettings();
+    void rescaleAxisForRuntimeMicrosteps(MotorAdapter &motor);
 };

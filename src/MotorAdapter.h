@@ -45,6 +45,7 @@ public:
     int32_t position() const;
     void setPosition(int32_t position);
     bool setProfile(uint32_t speedHz, uint32_t acceleration);
+    void setMicrosteps(uint16_t microsteps);
     uint16_t sgResult();
     uint8_t sgThreshold();
 

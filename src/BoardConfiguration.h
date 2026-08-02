@@ -32,11 +32,11 @@ constexpr BoardConfiguration BOARD_CONFIGURATION = {
     "Adafruit ESP32 Feather V2",
     7,
     8,
-    32,
-    33,
-    27,
-    14,
-    4,
+    32, // X_STEP_PIN
+    33, // X_DIR_PIN
+    27, // Y_STEP_PIN
+    14, // Y_DIR_PIN
+    4,  // ENABLE_PIN
     0,
 };
 #else

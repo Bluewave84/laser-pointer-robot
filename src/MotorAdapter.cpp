@@ -113,6 +113,11 @@ bool MotorAdapter::setProfile(uint32_t speedHz, uint32_t acceleration)
            stepper->setAcceleration(acceleration) == 0;
 }
 
+void MotorAdapter::setMicrosteps(uint16_t microsteps)
+{
+    driver.microsteps(microsteps);
+}
+
 uint16_t MotorAdapter::sgResult()
 {
     return driver.SG_RESULT();

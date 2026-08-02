@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "MotorAdapter.h"
+#include "MotionSettings.h"
 
 enum class PatternKind
 {
@@ -30,10 +31,11 @@ class TestController
 public:
     TestController(
         const TestControllerConfig &config,
+        const RuntimeMotionSettings &runtimeMotionSettings,
         MotorAdapter *&activeMotor,
         MotorAdapter &xMotor,
         MotorAdapter &yMotor)
-        : config(config), activeMotor(activeMotor), xMotor(xMotor), yMotor(yMotor)
+        : config(config), runtimeMotionSettings(runtimeMotionSettings), activeMotor(activeMotor), xMotor(xMotor), yMotor(yMotor)
     {
     }
 
@@ -52,6 +54,7 @@ private:
     };
 
     const TestControllerConfig &config;
+    const RuntimeMotionSettings &runtimeMotionSettings;
     MotorAdapter *&activeMotor;
     MotorAdapter &xMotor;
     MotorAdapter &yMotor;

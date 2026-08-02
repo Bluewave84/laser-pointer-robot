@@ -44,6 +44,10 @@ _Avoid_: Command
 The responsibility that parses transport input, currently single-character USB serial input, into catalog-backed Commands.
 _Avoid_: Network, robot motion
 
+**Web Command Input**:
+A Command Input transport that accepts HTTP requests using Command Catalog Web names and converts them into the same Commands as USB serial input.
+_Avoid_: Web motion controller, REST motion model
+
 **Command Catalog**:
 The responsibility that defines command groups, commands, parameters, transport aliases, Web names, and help text in one static table.
 _Avoid_: Transport parser, robot motion
@@ -81,7 +85,7 @@ The fixed hardware facts of a laser pointer robot build, such as pins, motor geo
 _Avoid_: Motion limits, command settings
 
 **Motion Limits**:
-The adjustable operating constraints used while moving, such as speed and acceleration limits.
+The adjustable operating constraints used while moving, such as speed, acceleration, and runtime microstepping limits.
 _Avoid_: Physical configuration, hardware facts
 
 **Stop Active Movement**:

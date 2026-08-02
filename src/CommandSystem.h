@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "MotorAdapter.h"
+#include "MotionSettings.h"
 #include "TestController.h"
 
 class HomingStateMachine;
@@ -24,6 +25,10 @@ enum class CommandId : uint8_t
     StartHoming,
     AbortActive,
     MoveToPosition,
+    MoveToZero,
+    SetMicrosteps,
+    SetSpeed,
+    SetAcceleration,
     PrintStallGuardSample,
     StartRangeTest,
     StartPatternTest,
@@ -35,6 +40,9 @@ enum class CommandParameterId : uint8_t
     None,
     Pattern,
     NormalizedPosition,
+    Microsteps,
+    Speed,
+    Acceleration,
 };
 
 enum class CommandPattern : uint8_t
@@ -48,7 +56,7 @@ enum class CommandPattern : uint8_t
 struct CommandParameter
 {
     CommandParameterId id;
-    uint8_t value;
+    uint32_t value;
     uint16_t xPosition;
     uint16_t yPosition;
 };
@@ -83,7 +91,7 @@ struct CommandDescriptor
     CommandGroup group;
     CommandId id;
     CommandParameterId parameter;
-    uint8_t parameterValue;
+    uint32_t parameterValue;
     char serialKey;
     const char *webName;
     const __FlashStringHelper *help;
@@ -130,6 +138,7 @@ public:
         TestController &testController,
         MotorAdapter &xMotor,
         MotorAdapter &yMotor,
+        RuntimeMotionSettings &runtimeMotionSettings,
         const CommandCatalog &catalog,
         Print &output,
         ConfigurationIsCompleteCallback configurationIsComplete,
@@ -138,6 +147,7 @@ public:
           testController(testController),
           xMotor(xMotor),
           yMotor(yMotor),
+          runtimeMotionSettings(runtimeMotionSettings),
           catalog(catalog),
           output(output),
           configurationIsComplete(configurationIsComplete),
@@ -152,12 +162,20 @@ private:
     TestController &testController;
     MotorAdapter &xMotor;
     MotorAdapter &yMotor;
+    RuntimeMotionSettings &runtimeMotionSettings;
     const CommandCatalog &catalog;
     Print &output;
     ConfigurationIsCompleteCallback configurationIsComplete;
     PrintDriverSampleCommandCallback printDriverSample;
 
     CommandResult moveToPosition(const CommandParameter &parameter);
+    CommandResult moveToZero();
+    CommandResult setMicrosteps(const CommandParameter &parameter);
+    CommandResult setSpeed(const CommandParameter &parameter);
+    CommandResult setAcceleration(const CommandParameter &parameter);
+    bool motorsAreIdle() const;
+    bool applyRuntimeMotionProfile();
+    void rescaleAxisForMicrosteps(MotorAdapter &motor, uint16_t fromMicrosteps, uint16_t toMicrosteps);
     int32_t positionFromNormalized(const Axis &axis, uint16_t normalizedPosition) const;
     CommandResult startPatternTest(const CommandParameter &parameter);
     PatternKind toPatternKind(CommandPattern pattern) const;
