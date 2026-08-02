@@ -47,6 +47,9 @@ private:
     void handleStatus();
     void handleNotFound();
     void handleCommandPost(const String &webName);
+    void registerCommandHandlers();
+    void sendCorsPreflight();
+    void sendJson(uint16_t statusCode, const String &response);
     bool commandFromRequest(const CommandDescriptor &descriptor, Command &command, String &errorMessage);
     void sendCommandResult(const CommandResult &result);
     void sendError(uint16_t statusCode, const __FlashStringHelper *message);

@@ -44,7 +44,7 @@ bool MotorAdapter::setupMotion(FastAccelStepperEngine &engine, uint8_t enablePin
     stepper->setDirectionPin(dirPin, true, 10);
     stepper->setEnablePin(enablePin, true);
     stepper->setAutoEnable(true);
-    stepper->setDelayToEnable(2000);
+    stepper->setDelayToEnable(50000);
     stepper->setDelayToDisable(100);
 
     if (!setProfile(defaultSpeedHz, defaultAcceleration))

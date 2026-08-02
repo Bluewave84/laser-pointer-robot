@@ -89,8 +89,17 @@ void WebCommandInput::begin()
 {
     server.on("/api/commands", HTTP_GET, [this]()
               { handleCommands(); });
+    server.on("/api/commands", HTTP_OPTIONS, [this]()
+              { sendCorsPreflight(); });
     server.on("/api/status", HTTP_GET, [this]()
               { handleStatus(); });
+    server.on("/api/status", HTTP_OPTIONS, [this]()
+              { sendCorsPreflight(); });
+    server.on("/", HTTP_GET, [this]()
+              { sendError(404, F("No browser UI is served by this firmware. Use /api/status or /api/commands.")); });
+    server.on("/favicon.ico", HTTP_GET, [this]()
+              { server.send(204, "text/plain", ""); });
+    registerCommandHandlers();
     server.onNotFound([this]()
                       { handleNotFound(); });
     server.begin();
@@ -119,7 +128,7 @@ void WebCommandInput::handleCommands()
 
     String response;
     serializeJson(document, response);
-    server.send(200, "application/json", response);
+    sendJson(200, response);
 }
 
 void WebCommandInput::handleStatus()
@@ -146,15 +155,14 @@ void WebCommandInput::handleStatus()
 
     String response;
     serializeJson(document, response);
-    server.send(200, "application/json", response);
+    sendJson(200, response);
 }
 
 void WebCommandInput::handleNotFound()
 {
-    const String prefix = "/api/commands/";
-    if (server.method() == HTTP_POST && server.uri().startsWith(prefix))
+    if (server.method() == HTTP_OPTIONS)
     {
-        handleCommandPost(server.uri().substring(prefix.length()));
+        sendCorsPreflight();
         return;
     }
 
@@ -179,11 +187,43 @@ void WebCommandInput::handleCommandPost(const String &webName)
         document["message"] = errorMessage;
         String response;
         serializeJson(document, response);
-        server.send(httpStatusCode(CommandStatus::InvalidParameter), "application/json", response);
+        sendJson(httpStatusCode(CommandStatus::InvalidParameter), response);
         return;
     }
 
     sendCommandResult(dispatcher.dispatch(command));
+}
+
+void WebCommandInput::registerCommandHandlers()
+{
+    uint8_t count = 0;
+    const CommandDescriptor *descriptors = catalog.commands(count);
+    for (uint8_t index = 0; index < count; index++)
+    {
+        const String webName = descriptors[index].webName;
+        const String path = String("/api/commands/") + webName;
+        server.on(path, HTTP_POST, [this, webName]()
+                  { handleCommandPost(webName); });
+        server.on(path, HTTP_OPTIONS, [this]()
+                  { sendCorsPreflight(); });
+    }
+}
+
+void WebCommandInput::sendCorsPreflight()
+{
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.sendHeader("Access-Control-Max-Age", "600");
+    server.send(204, "text/plain", "");
+}
+
+void WebCommandInput::sendJson(uint16_t statusCode, const String &response)
+{
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(statusCode, "application/json", response);
 }
 
 bool WebCommandInput::commandFromRequest(const CommandDescriptor &descriptor, Command &command, String &errorMessage)
@@ -252,7 +292,7 @@ void WebCommandInput::sendCommandResult(const CommandResult &result)
 
     String response;
     serializeJson(document, response);
-    server.send(httpStatusCode(result.status), "application/json", response);
+    sendJson(httpStatusCode(result.status), response);
 }
 
 void WebCommandInput::sendError(uint16_t statusCode, const __FlashStringHelper *message)
@@ -263,5 +303,5 @@ void WebCommandInput::sendError(uint16_t statusCode, const __FlashStringHelper *
 
     String response;
     serializeJson(document, response);
-    server.send(statusCode, "application/json", response);
+    sendJson(statusCode, response);
 }
